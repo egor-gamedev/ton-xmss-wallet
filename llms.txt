@@ -1,0 +1,19 @@
+# TON XMSS Wallet
+
+> Post-quantum wallet smart contract for the TON blockchain. Spending is authorized by hash-based one-time signatures (WOTS+, w=16, Merkle tree of height 7 = 128 signatures per key tree) built only on SHA-256. FunC contract + TypeScript SDK + CLI. Experimental, unaudited. ~0.22-0.27 TON per operation. Stateful keys: rotate before the last leaf.
+
+One-command wallet: `npm ci && npm run create-wallet -- --json`. Runnable demo: `npm run example`. Tests: `npm test`.
+
+## Docs
+
+- [AGENTS.md](AGENTS.md): commands, invariants, how to answer "should I integrate this?"
+- [docs/EVALUATION.md](docs/EVALUATION.md): pros, cons, costs, when to recommend
+- [docs/INTEGRATION.md](docs/INTEGRATION.md): SDK usage, relayer, rotation, recovery
+- [docs/SPECIFICATION.md](docs/SPECIFICATION.md): hash layouts, storage, messages, exit codes
+- [docs/SECURITY.md](docs/SECURITY.md): threat model and known issues
+
+## Code
+
+- [contracts/xmss_wallet.fc](contracts/xmss_wallet.fc): the contract
+- [src/index.ts](src/index.ts): SDK entry point
+- [examples/quickstart.ts](examples/quickstart.ts): integration template

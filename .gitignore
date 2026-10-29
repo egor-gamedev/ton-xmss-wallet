@@ -1,0 +1,19 @@
+node_modules/
+dist/
+temp/
+.idea/
+.vscode/
+.DS_Store
+
+# Environment and secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+keys/
+*.secret.json
+*secret*.json
+*secrets*.json
+xmss-artifacts/
+xmss-tree*.json
+*recovery*.txt
+deploy-info.json

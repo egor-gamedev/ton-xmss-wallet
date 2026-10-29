@@ -1,0 +1,994 @@
+// automatically generated from `contracts/xmss_wallet.fc` incl:`contracts/imports/stdlib.fc` 
+PROGRAM{
+  DECLPROC _require
+  DECLPROC commit_blinded_key
+  DECLPROC chain_step
+  DECLPROC chain_iter
+  DECLPROC rand_hash
+  DECLPROC ltree_hash
+  DECLPROC hash_message
+  DECLPROC read_word
+  DECLPROC verify_wots_plus
+  DECLPROC verify_merkle_path
+  DECLPROC verify_xmss
+  DECLPROC validate_blinded_key
+  DECLPROC consume_blinded_key
+  DECLPROC udict_count
+  DECLPROC load_storage
+  DECLPROC save_storage
+  DECLPROC wl_key
+  DECLPROC wl_contains
+  DECLPROC wl_set
+  DECLPROC wl_del
+  DECLPROC validate_send_mode
+  DECLPROC check_common
+  DECLPROC parse_body
+  DECLPROC handle_request
+  DECLPROC recv_external
+  DECLPROC recv_internal
+  85143 DECLMETHOD seqno
+  90856 DECLMETHOD get_wallet_id
+  101151 DECLMETHOD get_policy_hash
+  102059 DECLMETHOD get_root
+  93800 DECLMETHOD get_public_seed
+  115253 DECLMETHOD get_leaf_limit
+  90743 DECLMETHOD get_next_leaf
+  126785 DECLMETHOD get_leaves_remaining
+  115516 DECLMETHOD get_tree_height
+  85425 DECLMETHOD is_whitelisted
+  69221 DECLMETHOD get_blinded_keys_remaining
+  _require PROCINLINE:<{
+    SWAP
+    IFNOT:<{
+      THROWANY
+    }>ELSE<{
+      DROP
+    }>
+  }>
+  commit_blinded_key PROCINLINE:<{
+    1112297028 PUSHINT
+    NEWC
+    32 STU
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  chain_step PROCINLINE:<{
+    1464812360 PUSHINT
+    NEWC
+    32 STU
+    s1 s2 XCHG
+    256 STU
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  chain_iter PROCINLINE:<{
+    0 PUSHINT
+    WHILE:<{
+      s0 s1 PUSH2
+      LESS
+    }>DO<{
+      s3 s2 PUXC
+      chain_step INLINECALLDICT
+      s0 s2 XCHG
+      INC
+    }>
+    s2 s3 XCHG
+    3 BLKDROP
+  }>
+  rand_hash PROCINLINE:<{
+    1297241164 PUSHINT
+    NEWC
+    32 STU
+    s1 s2 XCHG
+    256 STU
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  ltree_hash PROCINLINE:<{
+    1280594501 PUSHINT
+    NEWC
+    32 STU
+    s1 s2 XCHG
+    256 STU
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  hash_message PROCINLINE:<{
+    NEWC
+    MYADDR
+    STSLICER
+    ENDC
+    HASHCU
+    s0 s4 XCHG
+    HASHCU
+    1481462599 PUSHINT
+    NEWC
+    32 STU
+    s1 s5 XCHG
+    256 STU
+    s1 s2 XCHG
+    8 STU
+    s1 s2 XCHG
+    8 STU
+    256 STU
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  read_word PROCINLINE:<{
+    DUP
+    SBITS
+    0 EQINT
+    IF:<{
+      DUP
+      SREFS
+      1 EQINT
+      154 PUSHINT
+      _require INLINECALLDICT
+      LDREF
+      DROP
+      CTOS
+    }>
+    DUP
+    SBITS
+    8 PUSHPOW2
+    GEQ
+    154 PUSHINT
+    _require INLINECALLDICT
+    256 LDU
+  }>
+  verify_wots_plus PROCINLINE:<{
+    NIL
+    0 PUSHINT
+    DUP
+    WHILE:<{
+      DUP
+      64 LESSINT
+    }>DO<{
+      63 PUSHINT
+      OVER
+      SUB
+      2 LSHIFT#
+      s4 s(-1) PUXC
+      RSHIFT
+      15 PUSHINT
+      AND
+      s2 s2 XCPU
+      ADD
+      s0 s6 XCHG
+      read_word INLINECALLDICT
+      15 PUSHINT
+      s0 s4 XCHG2
+      SUB
+      s6 PUSH
+      -ROT
+      chain_iter INLINECALLDICT
+      s1 s3 XCHG
+      TPUSH
+      s0 s2 XCHG
+      INC
+      s1 s5 XCHG
+    }>
+    DROP
+    s2 POP
+    960 PUSHINT
+    ROT
+    SUB
+    0 PUSHINT
+    WHILE:<{
+      DUP
+      3 LESSINT
+    }>DO<{
+      2 PUSHINT
+      OVER
+      SUB
+      2 LSHIFT#
+      s2 s(-1) PUXC
+      RSHIFT
+      15 PUSHINT
+      AND
+      s0 s5 XCHG
+      read_word INLINECALLDICT
+      15 PUSHINT
+      s0 s7 XCHG2
+      SUB
+      s5 PUSH
+      -ROT
+      chain_iter INLINECALLDICT
+      s1 s3 XCHG
+      TPUSH
+      s0 s2 XCHG
+      INC
+    }>
+    s2 s3 XCHG
+    3 BLKDROP
+    67 PUSHINT
+    WHILE:<{
+      DUP
+      1 GTINT
+    }>DO<{
+      NIL
+      0 PUSHINT
+      WHILE:<{
+        DUP
+        INC
+        s3 PUSH
+        LESS
+      }>DO<{
+        s3 s0 PUSH2
+        INDEXVAR
+        OVER
+        INC
+        s5 s(-1) PUXC
+        INDEXVAR
+        ltree_hash INLINECALLDICT
+        s1 s2 XCHG
+        TPUSH
+        SWAP
+        2 ADDCONST
+      }>
+      s0 s2 PUSH2
+      LESS
+      IF:<{
+        s1 s3 XCHG
+        INDEXVAR
+        s1 s2 XCHG
+        TPUSH
+        SWAP
+      }>ELSE<{
+        DROP
+        s2 POP
+      }>
+      INC
+      1 RSHIFT#
+    }>
+    DROP
+    0 INDEX
+    SWAP
+  }>
+  verify_merkle_path PROCINLINE:<{
+    7 PUSHINT
+    REPEAT:<{
+      s0 s3 XCHG
+      read_word INLINECALLDICT
+      s2 PUSH
+      1 PUSHINT
+      AND
+      IF:<{
+        s0 s3 XCHG
+        rand_hash INLINECALLDICT
+      }>ELSE<{
+        s3 s3 XCHG2
+        rand_hash INLINECALLDICT
+      }>
+      SWAP
+      1 RSHIFT#
+      3 ROLL
+    }>
+    NIP
+    s2 PUSH
+    SBITS
+    0 EQINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    s0 s2 XCHG
+    SREFS
+    0 EQINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    SWAP
+    EQUAL
+    135 PUSHINT
+    _require INLINECALLDICT
+    -1 PUSHINT
+  }>
+  verify_xmss PROCINLINE:<{
+    s0 s6 XCHG
+    CTOS
+    DUP
+    SBITS
+    328 PUSHINT
+    GEQ
+    154 PUSHINT
+    _require INLINECALLDICT
+    DUP
+    SREFS
+    2 LESSINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    8 LDU
+    SWAP
+    1 EQINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    64 LDU
+    s1 s4 PUXC
+    EQUAL
+    151 PUSHINT
+    _require INLINECALLDICT
+    s0 s3 XCHG
+    256 LDU
+    s1 s5 XCPU
+    EQUAL
+    135 PUSHINT
+    _require INLINECALLDICT
+    s3 s7 XCHG
+    s0 s6 XCHG
+    hash_message INLINECALLDICT
+    s2 s3 XCHG
+    verify_wots_plus INLINECALLDICT
+    s1 s3 s3 XCHG3
+    verify_merkle_path INLINECALLDICT
+  }>
+  validate_blinded_key PROCINLINE:<{
+    DUP
+    ISNULL
+    IF:<{
+      160 THROW
+    }>
+    SWAP
+    commit_blinded_key INLINECALLDICT
+    SWAP
+    8 PUSHPOW2
+    DICTUGET
+    NULLSWAPIFNOT
+    NIP
+    160 PUSHINT
+    _require INLINECALLDICT
+  }>
+  consume_blinded_key PROCINLINE:<{
+    commit_blinded_key INLINECALLDICT
+    SWAP
+    8 PUSHPOW2
+    DICTUDEL
+    DROP
+  }>
+  udict_count PROCINLINE:<{
+    OVER
+    ISNULL
+    IF:<{
+      2DROP
+      0 PUSHINT
+    }>ELSE<{
+      0 PUSHINT
+      s2 s1 PUSH2
+      DICTUMIN
+      NULLSWAPIFNOT2
+      s2 POP
+      WHILE:<{
+        SWAP
+      }>DO<{
+        SWAP
+        INC
+        s1 s3 s2 XCPU2
+        DICTUGETNEXT
+        NULLSWAPIFNOT2
+        s2 POP
+      }>
+      s1 s3 XCHG
+      3 BLKDROP
+    }>
+  }>
+  load_storage PROCINLINE:<{
+    c4 PUSH
+    CTOS
+    DUP
+    SREFS
+    2 EQINT
+    156 PUSHINT
+    _require INLINECALLDICT
+    8 LDU
+    SWAP
+    2 EQINT
+    156 PUSHINT
+    _require INLINECALLDICT
+    32 LDU
+    32 LDU
+    256 LDU
+    256 LDU
+    256 LDU
+    32 LDU
+    32 LDU
+    32 LDU
+    DUP
+    SBITS
+    0 EQINT
+    156 PUSHINT
+    _require INLINECALLDICT
+    LDREF
+    LDREF
+    DROP
+    SWAP
+    CTOS
+    SWAP
+    CTOS
+    SWAP
+    LDDICT
+    s0 s2 XCHG
+    LDDICT
+    s0 s3 XCHG
+    SEMPTY
+    156 PUSHINT
+    _require INLINECALLDICT
+    s0 s2 XCHG
+    SEMPTY
+    156 PUSHINT
+    _require INLINECALLDICT
+    s3 s4 PUSH2
+    LEQ
+    156 PUSHINT
+    _require INLINECALLDICT
+    s4 PUSH
+    7 PUSHPOW2
+    LEQ
+    156 PUSHINT
+    _require INLINECALLDICT
+    SWAP
+  }>
+  save_storage PROCINLINE:<{
+    NEWC
+    STDICT
+    ENDC
+    SWAP
+    NEWC
+    STDICT
+    ENDC
+    2 PUSHINT
+    NEWC
+    8 STU
+    s1 s10 XCHG
+    32 STU
+    s1 s8 XCHG
+    32 STU
+    s1 s6 XCHG
+    256 STU
+    s1 s4 XCHG
+    256 STU
+    s1 s2 XCHG
+    256 STU
+    32 STU
+    32 STU
+    32 STU
+    s1 s2 XCHG
+    STREF
+    STREF
+    ENDC
+    c4 POP
+  }>
+  wl_key PROCINLINE:<{
+    REWRITESTDADDR
+    1464617300 PUSHINT
+    NEWC
+    32 STU
+    s1 s2 XCHG
+    8 STI
+    256 STU
+    ENDC
+    HASHCU
+  }>
+  wl_contains PROCINLINE:<{
+    OVER
+    ISNULL
+    IF:<{
+      2DROP
+      0 PUSHINT
+    }>ELSE<{
+      wl_key INLINECALLDICT
+      SWAP
+      8 PUSHPOW2
+      DICTUGET
+      NULLSWAPIFNOT
+      NIP
+    }>
+  }>
+  wl_set PROCINLINE:<{
+    NEWC
+    ENDC
+    CTOS
+    SWAP
+    wl_key INLINECALLDICT
+    ROT
+    8 PUSHPOW2
+    DICTUSET
+  }>
+  wl_del PROCINLINE:<{
+    wl_key INLINECALLDICT
+    SWAP
+    8 PUSHPOW2
+    DICTUDEL
+    DROP
+  }>
+  validate_send_mode PROCINLINE:<{
+    DUP
+    0 EQINT
+    OVER
+    1 EQINT
+    OR
+    OVER
+    2 EQINT
+    OR
+    OVER
+    64 EQINT
+    OR
+    OVER
+    65 EQINT
+    OR
+    SWAP
+    66 EQINT
+    OR
+    157 PUSHINT
+    _require INLINECALLDICT
+  }>
+  check_common PROCINLINE:<{
+    s4 s4 XCHG2
+    EQUAL
+    133 PUSHINT
+    _require INLINECALLDICT
+    s1 s4 XCHG
+    EQUAL
+    134 PUSHINT
+    _require INLINECALLDICT
+    OVER
+    NOW
+    GREATER
+    136 PUSHINT
+    _require INLINECALLDICT
+    NOW
+    86400 PUSHINT
+    ADD
+    s1 s2 XCHG
+    LEQ
+    136 PUSHINT
+    _require INLINECALLDICT
+    EQUAL
+    148 PUSHINT
+    _require INLINECALLDICT
+  }>
+  parse_body PROCINLINE:<{
+    OVER
+    SBITS
+    31 GTINT
+    138 PUSHINT
+    _require INLINECALLDICT
+    SWAP
+    32 LDU
+    s0 s2 XCHG
+    EQUAL
+    138 PUSHINT
+    _require INLINECALLDICT
+    DUP
+    SREFS
+    1 GTINT
+    138 PUSHINT
+    _require INLINECALLDICT
+    LDREF
+    LDREF
+    DUP
+    SBITS
+    0 EQINT
+    138 PUSHINT
+    _require INLINECALLDICT
+    SREFS
+    0 EQINT
+    138 PUSHINT
+    _require INLINECALLDICT
+    DUP
+    CTOS
+    DUP
+    SBITS
+    616 PUSHINT
+    GEQ
+    138 PUSHINT
+    _require INLINECALLDICT
+    32 LDU
+    32 LDU
+    32 LDU
+    256 LDU
+    8 LDU
+    256 LDU
+    6 -ROLL
+  }>
+  handle_request PROC:<{
+    s3 17 s() XCHG
+    s2 16 s() XCHG
+    s15 s14 s10 XC2PU
+    s12 s10 PUSH2
+    check_common INLINECALLDICT
+    s1 s2 PUSH2
+    LESS
+    153 PUSHINT
+    _require INLINECALLDICT
+    DUP
+    0 GTINT
+    160 PUSHINT
+    _require INLINECALLDICT
+    s12 s8 XCHG2
+    consume_blinded_key INLINECALLDICT
+    s0 s7 XCHG
+    DEC
+    s3 s14 XCHG
+    s2 s15 XCHG
+    s14 PUSH
+    s0 s2 XCHG
+    16 s() PUSH
+    s13 s2 s(-1) PUXC2
+    s11 s13 s12 PUXC2
+    verify_xmss INLINECALLDICT
+    -1 EQINT
+    135 PUSHINT
+    _require INLINECALLDICT
+    s0 s2 XCHG
+    INC
+    s0 s7 XCHG
+    INC
+    s4 PUSH
+    0 EQINT
+    IF:<{
+      s4 POP
+      s8 PUSH
+      SBITS
+      7 GTINT
+      138 PUSHINT
+      _require INLINECALLDICT
+      s0 s8 XCHG
+      8 LDU
+      OVER
+      validate_send_mode INLINECALLDICT
+      DUP
+      SREFS
+      1 EQINT
+      138 PUSHINT
+      _require INLINECALLDICT
+      LDREF
+      DUP
+      SBITS
+      0 EQINT
+      138 PUSHINT
+      _require INLINECALLDICT
+      SREFS
+      0 EQINT
+      138 PUSHINT
+      _require INLINECALLDICT
+      SWAP
+      SENDRAWMSG
+      s5 s9 XCHG
+      s0 s7 XCHG
+      s0 s8 XCHG
+      s3 s6 s6 XCHG3
+      save_storage INLINECALLDICT
+      COMMIT
+    }>ELSE<{
+      s4 PUSH
+      1 EQINT
+      IF:<{
+        s1 s6 XCHG
+        6 BLKDROP
+        s4 POP
+        s4 POP
+        OVER
+        SREFS
+        1 EQINT
+        138 PUSHINT
+        _require INLINECALLDICT
+        SWAP
+        LDREF
+        SWAP
+        CTOS
+        DUP
+        SBITS
+        832 PUSHINT
+        GEQ
+        138 PUSHINT
+        _require INLINECALLDICT
+        256 LDU
+        256 LDU
+        32 LDU
+        256 LDU
+        32 LDU
+        DUP
+        SREFS
+        1 EQINT
+        138 PUSHINT
+        _require INLINECALLDICT
+        LDREF
+        SBITS
+        0 EQINT
+        138 PUSHINT
+        _require INLINECALLDICT
+        s6 PUSH
+        SBITS
+        0 EQINT
+        138 PUSHINT
+        _require INLINECALLDICT
+        s0 s6 XCHG
+        SREFS
+        0 EQINT
+        138 PUSHINT
+        _require INLINECALLDICT
+        s0 s5 XCHG
+        CTOS
+        LDDICT
+        SEMPTY
+        138 PUSHINT
+        _require INLINECALLDICT
+        DUP
+        8 PUSHPOW2
+        udict_count INLINECALLDICT
+        s6 s(-1) PUXC
+        EQUAL
+        160 PUSHINT
+        _require INLINECALLDICT
+        s5 PUSH
+        0 GTINT
+        160 PUSHINT
+        _require INLINECALLDICT
+        s2 PUSH
+        0 GTINT
+        153 PUSHINT
+        _require INLINECALLDICT
+        s2 PUSH
+        7 PUSHPOW2
+        LEQ
+        153 PUSHINT
+        _require INLINECALLDICT
+        s1 s6 XCHG
+        s4 s5 XCHG
+        s3 s4 XCHG
+        s2 s3 XCHG
+        0 PUSHINT
+        3 -ROLL
+        save_storage INLINECALLDICT
+        COMMIT
+      }>ELSE<{
+        s4 PUSH
+        2 EQINT
+        IF:<{
+          s4 POP
+          s8 PUSH
+          SBITS
+          0 EQINT
+          138 PUSHINT
+          _require INLINECALLDICT
+          s8 PUSH
+          SREFS
+          1 EQINT
+          138 PUSHINT
+          _require INLINECALLDICT
+          s0 s8 XCHG
+          LDREF
+          DROP
+          CTOS
+          s1 s7 XCHG
+          wl_set INLINECALLDICT
+          s5 s9 XCHG
+          s7 s8 XCHG
+          s6 s7 XCHG
+          s3 s0 s0 XCHG3
+          save_storage INLINECALLDICT
+          COMMIT
+        }>ELSE<{
+          s0 s4 XCHG
+          3 EQINT
+          IF:<{
+            s8 PUSH
+            SBITS
+            0 EQINT
+            138 PUSHINT
+            _require INLINECALLDICT
+            s8 PUSH
+            SREFS
+            1 EQINT
+            138 PUSHINT
+            _require INLINECALLDICT
+            s0 s8 XCHG
+            LDREF
+            DROP
+            CTOS
+            s1 s7 XCHG
+            wl_del INLINECALLDICT
+            s5 s9 XCHG
+            s7 s8 XCHG
+            s6 s7 XCHG
+            s3 s0 s0 XCHG3
+            save_storage INLINECALLDICT
+            COMMIT
+          }>ELSE<{
+            11 BLKDROP
+            138 THROW
+          }>
+        }>
+      }>
+    }>
+  }>
+  recv_external PROC:<{
+    DUP
+    SBITS
+    32 LESSINT
+    IFJMP:<{
+      DROP
+    }>
+    DUP
+    32 PLDU
+    1936287598 PUSHINT
+    NEQ
+    IFJMP:<{
+      DROP
+    }>
+    1936287598 PUSHINT
+    parse_body INLINECALLDICT
+    load_storage INLINECALLDICT
+    s13 s9 PUSH2
+    EQUAL
+    133 PUSHINT
+    _require INLINECALLDICT
+    18 s() PUSH
+    CTOS
+    DUP
+    SBITS
+    328 PUSHINT
+    GEQ
+    154 PUSHINT
+    _require INLINECALLDICT
+    DUP
+    SREFS
+    2 LESSINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    8 LDU
+    SWAP
+    1 EQINT
+    154 PUSHINT
+    _require INLINECALLDICT
+    64 LDU
+    s1 s5 XCPU
+    EQUAL
+    151 PUSHINT
+    _require INLINECALLDICT
+    256 LDU
+    DROP
+    s6 PUSH
+    EQUAL
+    135 PUSHINT
+    _require INLINECALLDICT
+    s10 s0 PUSH2
+    validate_blinded_key INLINECALLDICT
+    s10 PUSH
+    commit_blinded_key INLINECALLDICT
+    ACCEPT
+    1 PUSHINT
+    SWAP
+    handle_request CALLDICT
+  }>
+  recv_internal PROC:<{
+    SWAP
+    CTOS
+    4 LDU
+    SWAP
+    1 PUSHINT
+    AND
+    IFJMP:<{
+      3 BLKDROP
+    }>
+    LDMSGADDR
+    DROP
+    OVER
+    SBITS
+    32 LESSINT
+    IFJMP:<{
+      3 BLKDROP
+    }>
+    OVER
+    32 PLDU
+    1936289396 PUSHINT
+    NEQ
+    IFJMP:<{
+      3 BLKDROP
+    }>
+    s0 s2 XCHG
+    50000000 PUSHINT
+    GEQ
+    159 PUSHINT
+    _require INLINECALLDICT
+    load_storage INLINECALLDICT
+    OVER
+    ISNULL
+    IF:<{
+      158 THROW
+    }>
+    s1 s11 PUXC
+    wl_contains INLINECALLDICT
+    158 PUSHINT
+    _require INLINECALLDICT
+    s0 s9 XCHG
+    1936289396 PUSHINT
+    parse_body INLINECALLDICT
+    DUP
+    19 s() PUSH
+    validate_blinded_key INLINECALLDICT
+    DUP
+    commit_blinded_key INLINECALLDICT
+    s9 19 s() XCHG
+    s8 18 s() XCHG
+    s7 17 s() XCHG
+    s6 16 s() XCHG
+    s5 s15 XCHG
+    s4 s14 XCHG
+    s3 s13 XCHG
+    s12 s11 s0 XCHG3
+    s7 s10 XCHG
+    s6 s9 XCHG
+    s5 s8 XCHG
+    s4 s7 XCHG
+    s3 s6 XCHG
+    s5 s4 s0 XCHG3
+    s1 s3 XCHG
+    2 PUSHINT
+    SWAP
+    handle_request CALLDICT
+  }>
+  seqno PROC:<{
+    load_storage INLINECALLDICT
+    9 BLKDROP
+  }>
+  get_wallet_id PROC:<{
+    load_storage INLINECALLDICT
+    s8 s9 XCHG
+    9 BLKDROP
+  }>
+  get_policy_hash PROC:<{
+    load_storage INLINECALLDICT
+    s7 s9 XCHG
+    9 BLKDROP
+  }>
+  get_root PROC:<{
+    load_storage INLINECALLDICT
+    s6 s9 XCHG
+    9 BLKDROP
+  }>
+  get_public_seed PROC:<{
+    load_storage INLINECALLDICT
+    s5 s9 XCHG
+    9 BLKDROP
+  }>
+  get_leaf_limit PROC:<{
+    load_storage INLINECALLDICT
+    s4 s9 XCHG
+    9 BLKDROP
+  }>
+  get_next_leaf PROC:<{
+    load_storage INLINECALLDICT
+    s3 s9 XCHG
+    9 BLKDROP
+  }>
+  get_leaves_remaining PROC:<{
+    load_storage INLINECALLDICT
+    3 BLKDROP
+    5 2 BLKDROP2
+    SUB
+  }>
+  get_tree_height PROC:<{
+    7 PUSHINT
+  }>
+  is_whitelisted PROC:<{
+    load_storage INLINECALLDICT
+    s1 s9 XCHG
+    9 BLKDROP
+    DUP
+    ISNULL
+    IFJMP:<{
+      2DROP
+      0 PUSHINT
+    }>
+    SWAP
+    wl_contains INLINECALLDICT
+  }>
+  get_blinded_keys_remaining PROC:<{
+    load_storage INLINECALLDICT
+    s2 s9 XCHG
+    9 BLKDROP
+  }>
+}END>c

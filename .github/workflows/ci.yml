@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Check code hash is unchanged
+        run: node -e "const h=require('./build/xmss_wallet.compiled.json').hash; if(h!=='ff6a94b4e2174005bbf87215a9f7d9b69b284b4bc6cca30327ee9f5f1887f5d7'){console.error('code hash changed: '+h+' — update docs and EXPECTED_CODE_HASH');process.exit(1)}"
+      - run: npm test

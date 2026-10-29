@@ -1,0 +1,627 @@
+#pragma version =0.4.4;
+#include "imports/stdlib.fc";
+
+;; ============================================================
+;; XMSS / WOTS+ WALLET  v2
+;; blinded keys: on-chain store hash(tag || preimage),
+;; transaction carries only 256-bit preimage
+;; ============================================================
+
+const int ALLOW_EXTERNAL = 1;
+const int MIN_INTERNAL_MSG_VALUE = 50000000;
+
+const int err::invalid_seqno        = 133;
+const int err::invalid_wallet_id    = 134;
+const int err::invalid_signature    = 135;
+const int err::expired              = 136;
+const int err::invalid_op           = 138;
+const int err::policy_mismatch      = 148;
+const int err::invalid_leaf_index   = 151;
+const int err::wallet_exhausted     = 153;
+const int err::invalid_proof_format = 154;
+const int err::bad_storage          = 156;
+const int err::bad_mode             = 157;
+const int err::not_whitelisted      = 158;
+const int err::insufficient_value   = 159;
+const int err::invalid_blinded_key  = 160;
+
+const int op::signed_external = 0x7369676E;  ;; "sign"
+const int op::signed_internal = 0x73696E74;  ;; "sint"
+
+const int req::transfer    = 0x00;
+const int req::rotate_root = 0x01;
+const int req::wl_add      = 0x02;
+const int req::wl_remove   = 0x03;
+
+const int AUTH_EXTERNAL = 1;
+const int AUTH_INTERNAL = 2;
+
+const int tag::wots_chain   = 0x574F4348;
+const int tag::ltree        = 0x4C545245;
+const int tag::merkle       = 0x4D52544C;
+const int tag::xmss_msg     = 0x584D5347;
+const int tag::wl_key       = 0x574C4954;
+const int tag::blinded_key  = 0x424C4E44;
+
+const int PROOF_VERSION = 0x01;
+
+const int WOTS_W        = 16;
+const int WOTS_LEN1     = 64;
+const int WOTS_LEN2     = 3;
+const int WOTS_LEN      = 67;
+const int WOTS_CSUM_MAX = WOTS_LEN1 * (WOTS_W - 1);
+
+const int TREE_HEIGHT     = 7;
+const int TREE_MAX_LEAVES  = 128;
+const int MAX_VALID_UNTIL_DELTA = 86400;
+
+const int WL_KEY_BITS      = 256;
+const int BLINDED_KEY_BITS = 256;
+
+;; ── helpers ──────────────────────────────────────────────────
+
+() _require(int cond, int exc) impure inline {
+    ifnot (cond) { throw(exc); }
+}
+
+int commit_blinded_key(int preimage) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::blinded_key, 32)
+            .store_uint(preimage, 256)
+        .end_cell()
+    );
+}
+
+;; ── WOTS+ / Merkle ───────────────────────────────────────────
+
+int chain_step(int public_seed, int x) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::wots_chain, 32)
+            .store_uint(public_seed, 256)
+            .store_uint(x, 256)
+        .end_cell()
+    );
+}
+
+int chain_iter(int public_seed, int x, int steps) inline {
+    int i = 0;
+    while (i < steps) {
+        x = chain_step(public_seed, x);
+        i += 1;
+    }
+    return x;
+}
+
+int rand_hash(int left, int right) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::merkle, 32)
+            .store_uint(left, 256)
+            .store_uint(right, 256)
+        .end_cell()
+    );
+}
+
+int ltree_hash(int left, int right) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::ltree, 32)
+            .store_uint(left, 256)
+            .store_uint(right, 256)
+        .end_cell()
+    );
+}
+
+int hash_message(cell payload, int req_type, int auth_mode, int auth_key) inline {
+    int addr_hash = cell_hash(
+        begin_cell()
+            .store_slice(my_address())
+        .end_cell()
+    );
+
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::xmss_msg, 32)
+            .store_uint(addr_hash, 256)
+            .store_uint(auth_mode, 8)
+            .store_uint(req_type, 8)
+            .store_uint(auth_key, 256)
+            .store_uint(cell_hash(payload), 256)
+        .end_cell()
+    );
+}
+
+(int, slice) read_word(slice cs) inline {
+    if (slice_bits(cs) == 0) {
+        _require(slice_refs(cs) == 1, err::invalid_proof_format);
+        cs = begin_parse(cs~load_ref());
+    }
+    _require(slice_bits(cs) >= 256, err::invalid_proof_format);
+    return (cs~load_uint(256), cs);
+}
+
+(int, slice) verify_wots_plus(slice cs, int public_seed, int msg_hash) inline {
+    tuple pks = empty_tuple();
+    int sum = 0;
+    int i = 0;
+
+    while (i < WOTS_LEN1) {
+        int coef = (msg_hash >> ((WOTS_LEN1 - 1 - i) * 4)) & 15;
+        sum += coef;
+        var (sig, cs2) = read_word(cs);
+        cs = cs2;
+        pks = tpush(pks, chain_iter(public_seed, sig, WOTS_W - 1 - coef));
+        i += 1;
+    }
+
+    int csum = WOTS_CSUM_MAX - sum;
+    int j = 0;
+    while (j < WOTS_LEN2) {
+        int coef = (csum >> ((WOTS_LEN2 - 1 - j) * 4)) & 15;
+        var (sig, cs2) = read_word(cs);
+        cs = cs2;
+        pks = tpush(pks, chain_iter(public_seed, sig, WOTS_W - 1 - coef));
+        j += 1;
+    }
+
+    int sz = WOTS_LEN;
+    while (sz > 1) {
+        tuple next = empty_tuple();
+        int k = 0;
+        while (k + 1 < sz) {
+            next = tpush(next, ltree_hash(pks.at(k), pks.at(k + 1)));
+            k += 2;
+        }
+        if (k < sz) {
+            next = tpush(next, pks.at(k));
+        }
+        pks = next;
+        sz = (sz + 1) >> 1;
+    }
+
+    return (pks.at(0), cs);
+}
+
+int verify_merkle_path(slice cs, int leaf, int idx, int root) inline {
+    int node = leaf;
+    int pos  = idx;
+
+    repeat(TREE_HEIGHT) {
+        var (sib, cs2) = read_word(cs);
+        cs = cs2;
+        node = (pos & 1) ? rand_hash(sib, node) : rand_hash(node, sib);
+        pos >>= 1;
+    }
+
+    _require(slice_bits(cs) == 0, err::invalid_proof_format);
+    _require(slice_refs(cs) == 0, err::invalid_proof_format);
+    _require(node == root, err::invalid_signature);
+
+    return -1;
+}
+
+int verify_xmss(
+    cell payload,
+    cell proof,
+    int root,
+    int public_seed,
+    int expected_idx,
+    int req_type,
+    int auth_mode,
+    int auth_key
+) inline {
+    slice cs = begin_parse(proof);
+
+    _require(slice_bits(cs) >= (8 + 64 + 256), err::invalid_proof_format);
+    _require(slice_refs(cs) <= 1, err::invalid_proof_format);
+
+    int version = cs~load_uint(8);
+    _require(version == PROOF_VERSION, err::invalid_proof_format);
+
+    int idx = cs~load_uint(64);
+    _require(idx == expected_idx, err::invalid_leaf_index);
+
+    int proof_pub_seed = cs~load_uint(256);
+    _require(proof_pub_seed == public_seed, err::invalid_signature);
+
+    var (leaf, cs2) = verify_wots_plus(cs, public_seed, hash_message(payload, req_type, auth_mode, auth_key));
+    return verify_merkle_path(cs2, leaf, idx, root);
+}
+
+;; ── blinded keys ─────────────────────────────────────────────
+
+() validate_blinded_key(int blinded_preimage, cell blinded_dict) impure inline {
+    if (cell_null?(blinded_dict)) {
+        throw(err::invalid_blinded_key);
+    }
+
+    int key_hash = commit_blinded_key(blinded_preimage);
+    var (_, found) = udict_get?(blinded_dict, BLINDED_KEY_BITS, key_hash);
+    _require(found, err::invalid_blinded_key);
+}
+
+cell consume_blinded_key(cell blinded_dict, int blinded_preimage) impure inline {
+    int key_hash = commit_blinded_key(blinded_preimage);
+    var (new_dict, _) = udict_delete?(blinded_dict, BLINDED_KEY_BITS, key_hash);
+    return new_dict;
+}
+
+;; ── storage ──────────────────────────────────────────────────
+;;
+;; Layout (version = 2):
+;;   uint8   version
+;;   uint32  seqno
+;;   uint32  wallet_id
+;;   uint256 policy
+;;   uint256 root
+;;   uint256 pub_seed
+;;   uint32  limit
+;;   uint32  next_leaf
+;;   uint32  blinded_remaining
+;;   ref[0]: wl_dict
+;;   ref[1]: blinded_dict
+
+(int, int, int, int, int, int, int, int, cell, cell) load_storage() inline {
+    slice a = begin_parse(get_data());
+
+    _require(slice_refs(a) == 2, err::bad_storage);
+
+    int version = a~load_uint(8);
+    _require(version == 2, err::bad_storage);
+
+    int seqno             = a~load_uint(32);
+    int wallet_id         = a~load_uint(32);
+    int policy            = a~load_uint(256);
+    int root              = a~load_uint(256);
+    int pub_seed          = a~load_uint(256);
+    int limit             = a~load_uint(32);
+    int next_leaf         = a~load_uint(32);
+    int blinded_remaining = a~load_uint(32);
+
+    _require(slice_bits(a) == 0, err::bad_storage);
+
+    cell wl_box      = a~load_ref();
+    cell blinded_box = a~load_ref();
+
+    slice wl_slice      = begin_parse(wl_box);
+    slice blinded_slice = begin_parse(blinded_box);
+
+    var (wl_rem, wl_dict)   = wl_slice.load_dict();
+    var (bl_rem, blinded_dict) = blinded_slice.load_dict();
+
+    _require(wl_rem.slice_empty?(), err::bad_storage);
+    _require(bl_rem.slice_empty?(), err::bad_storage);
+
+    _require(next_leaf <= limit, err::bad_storage);
+    _require(limit <= TREE_MAX_LEAVES, err::bad_storage);
+
+    return (seqno, wallet_id, policy, root, pub_seed, limit, next_leaf, blinded_remaining, wl_dict, blinded_dict);
+}
+
+() save_storage(
+    int seqno, int wallet_id, int policy,
+    int root, int pub_seed, int limit, int next_leaf,
+    int blinded_remaining,
+    cell wl_dict, cell blinded_dict
+) impure inline {
+    set_data(
+        begin_cell()
+            .store_uint(2, 8)
+            .store_uint(seqno, 32)
+            .store_uint(wallet_id, 32)
+            .store_uint(policy, 256)
+            .store_uint(root, 256)
+            .store_uint(pub_seed, 256)
+            .store_uint(limit, 32)
+            .store_uint(next_leaf, 32)
+            .store_uint(blinded_remaining, 32)
+            .store_ref(
+                begin_cell().store_dict(wl_dict).end_cell()
+            )
+            .store_ref(
+                begin_cell().store_dict(blinded_dict).end_cell()
+            )
+        .end_cell()
+    );
+}
+
+;; ── whitelist helpers ─────────────────────────────────────────
+
+int wl_key(slice addr) inline {
+    var (wc, ah) = parse_std_addr(addr);
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::wl_key, 32)
+            .store_int(wc, 8)
+            .store_uint(ah, 256)
+        .end_cell()
+    );
+}
+
+int wl_contains(cell wl_dict, slice addr) inline {
+    if (cell_null?(wl_dict)) { return 0; }
+    var (_, found) = udict_get?(wl_dict, WL_KEY_BITS, wl_key(addr));
+    return found;
+}
+
+cell wl_set(cell wl_dict, slice addr) inline {
+    return udict_set(wl_dict, WL_KEY_BITS, wl_key(addr), begin_cell().end_cell().begin_parse());
+}
+
+cell wl_del(cell wl_dict, slice addr) inline {
+    var (new_dict, _) = udict_delete?(wl_dict, WL_KEY_BITS, wl_key(addr));
+    return new_dict;
+}
+
+;; ── misc validation ───────────────────────────────────────────
+
+() validate_send_mode(int mode) impure inline {
+    int ok = (mode == 0) | (mode == 1) | (mode == 2) |
+             (mode == 64) | (mode == 65) | (mode == 66);
+    _require(ok, err::bad_mode);
+}
+
+() check_common(
+    int wallet_id_in, int valid_until, int seqno_in, int policy_in,
+    int wid, int seqno, int policy
+) impure inline {
+    _require(seqno_in     == seqno,                         err::invalid_seqno);
+    _require(wallet_id_in == wid,                           err::invalid_wallet_id);
+    _require(valid_until  > now(),                           err::expired);
+    _require(valid_until  <= now() + MAX_VALID_UNTIL_DELTA,  err::expired);
+    _require(policy_in    == policy,                         err::policy_mismatch);
+}
+
+;; ── body parser ───────────────────────────────────────────────
+
+(cell, cell, slice, int, int, int, int, int, int) parse_body(slice body, int expected_op) inline {
+    _require(slice_bits(body) >= 32, err::invalid_op);
+    _require(body~load_uint(32) == expected_op, err::invalid_op);
+
+    _require(slice_refs(body) >= 2, err::invalid_op);
+    cell proof   = body~load_ref();
+    cell payload = body~load_ref();
+    _require(slice_bits(body) == 0, err::invalid_op);
+    _require(slice_refs(body) == 0, err::invalid_op);
+
+    slice ps = begin_parse(payload);
+    _require(slice_bits(ps) >= (32 + 32 + 32 + 256 + 8 + 256), err::invalid_op);
+
+    int wallet_id       = ps~load_uint(32);
+    int valid_until     = ps~load_uint(32);
+    int seqno_in        = ps~load_uint(32);
+    int policy_in       = ps~load_uint(256);
+    int req_type        = ps~load_uint(8);
+    int blinded_preimage = ps~load_uint(256);
+
+    return (proof, payload, ps, wallet_id, valid_until, seqno_in, policy_in, req_type, blinded_preimage);
+}
+
+;; ── request handler ───────────────────────────────────────────
+
+() handle_request(
+    cell proof, cell payload, slice ps,
+    int wallet_id_in, int valid_until, int seqno_in, int policy_in, int req_type,
+    int blinded_preimage,
+    int seqno, int wid, int policy,
+    int root, int pub_seed, int limit, int next_leaf,
+    int blinded_remaining,
+    cell wl_dict,
+    cell blinded_dict,
+    int auth_mode,
+    int auth_key
+) impure {
+
+    check_common(wallet_id_in, valid_until, seqno_in, policy_in, wid, seqno, policy);
+    _require(next_leaf < limit,      err::wallet_exhausted);
+    _require(blinded_remaining > 0,  err::invalid_blinded_key);
+
+    ;; heavy dict delete — only after accept_message() for external
+    cell next_blinded_dict = consume_blinded_key(blinded_dict, blinded_preimage);
+    int next_blinded_remaining = blinded_remaining - 1;
+
+    _require(
+        verify_xmss(payload, proof, root, pub_seed, next_leaf, req_type, auth_mode, auth_key) == -1,
+        err::invalid_signature
+    );
+
+    int new_seqno = seqno + 1;
+    int new_next  = next_leaf + 1;
+
+    if (req_type == req::transfer) {
+        _require(slice_bits(ps) >= 8, err::invalid_op);
+        int mode = ps~load_uint(8);
+        validate_send_mode(mode);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        cell out_msg = ps~load_ref();
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 0, err::invalid_op);
+
+        send_raw_message(out_msg, mode);
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next, next_blinded_remaining, wl_dict, next_blinded_dict);
+        commit();
+
+    } elseif (req_type == req::rotate_root) {
+        _require(slice_bits(ps) >= (256 + 256 + 32 + 256), err::invalid_op);
+        int new_root     = ps~load_uint(256);
+        int new_pub_seed = ps~load_uint(256);
+        int new_limit    = ps~load_uint(32);
+        int new_policy   = ps~load_uint(256);
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 0, err::invalid_op);
+
+        _require(new_limit > 0,               err::wallet_exhausted);
+        _require(new_limit <= TREE_MAX_LEAVES, err::wallet_exhausted);
+
+        save_storage(new_seqno, wid, new_policy, new_root, new_pub_seed, new_limit, 0, next_blinded_remaining, wl_dict, next_blinded_dict);
+        commit();
+
+    } elseif (req_type == req::wl_add) {
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        slice addr = begin_parse(ps~load_ref());
+        _ = wl_key(addr);
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next, next_blinded_remaining, wl_set(wl_dict, addr), next_blinded_dict);
+        commit();
+
+    } elseif (req_type == req::wl_remove) {
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        slice addr = begin_parse(ps~load_ref());
+        _ = wl_key(addr);
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next, next_blinded_remaining, wl_del(wl_dict, addr), next_blinded_dict);
+        commit();
+
+    } else {
+        throw(err::invalid_op);
+    }
+}
+
+;; ── recv_external ─────────────────────────────────────────────
+
+() recv_external(slice in_msg) impure {
+    if (ALLOW_EXTERNAL == 0) { return (); }
+
+    if (slice_bits(in_msg) < 32) { return (); }
+    if (in_msg.preload_uint(32) != op::signed_external) { return (); }
+
+    var (proof, payload, ps, wallet_id_in, valid_until, seqno_in, policy_in, req_type, blinded_preimage)
+        = parse_body(in_msg, op::signed_external);
+
+    var (seqno, wid, policy, root, pub_seed, limit, next_leaf, blinded_remaining, wl_dict, blinded_dict)
+        = load_storage();
+
+    ;; cheap checks before accept_message
+    _require(seqno_in     == seqno,                         err::invalid_seqno);
+    _require(wallet_id_in == wid,                           err::invalid_wallet_id);
+    _require(valid_until  > now(),                          err::expired);
+    _require(valid_until  <= now() + MAX_VALID_UNTIL_DELTA, err::expired);
+    _require(policy_in    == policy,                        err::policy_mismatch);
+    _require(next_leaf    < limit,                          err::wallet_exhausted);
+    _require(blinded_remaining > 0,                         err::invalid_blinded_key);
+
+    {
+        slice cs = begin_parse(proof);
+        _require(slice_bits(cs) >= (8 + 64 + 256), err::invalid_proof_format);
+        _require(slice_refs(cs) <= 1,               err::invalid_proof_format);
+        _require(cs~load_uint(8)   == PROOF_VERSION, err::invalid_proof_format);
+        _require(cs~load_uint(64)  == next_leaf,     err::invalid_leaf_index);
+        _require(cs~load_uint(256) == pub_seed,      err::invalid_signature);
+    }
+
+    validate_blinded_key(blinded_preimage, blinded_dict);
+
+    int blinded_key_hash = commit_blinded_key(blinded_preimage);
+
+    accept_message();
+
+    handle_request(
+        proof, payload, ps,
+        wallet_id_in, valid_until, seqno_in, policy_in, req_type,
+        blinded_preimage,
+        seqno, wid, policy, root, pub_seed, limit, next_leaf,
+        blinded_remaining,
+        wl_dict, blinded_dict,
+        AUTH_EXTERNAL,
+        blinded_key_hash
+    );
+}
+
+;; ── recv_internal ─────────────────────────────────────────────
+
+() recv_internal(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    slice hdr = begin_parse(in_msg_full);
+    int flags = hdr~load_uint(4);
+
+    if (flags & 1) { return (); }  ;; bounced
+
+    slice sender_raw = hdr~load_msg_addr();
+
+    if (slice_bits(in_msg_body) < 32) { return (); }
+    if (in_msg_body.preload_uint(32) != op::signed_internal) { return (); }
+
+    _require(msg_value >= MIN_INTERNAL_MSG_VALUE, err::insufficient_value);
+
+    var (seqno, wid, policy, root, pub_seed, limit, next_leaf, blinded_remaining, wl_dict, blinded_dict)
+        = load_storage();
+
+    if (cell_null?(wl_dict)) { throw(err::not_whitelisted); }
+    _require(wl_contains(wl_dict, sender_raw), err::not_whitelisted);
+
+    var (proof, payload, ps, wallet_id_in, valid_until, seqno_in, policy_in, req_type, blinded_preimage)
+        = parse_body(in_msg_body, op::signed_internal);
+
+    validate_blinded_key(blinded_preimage, blinded_dict);
+
+    int sender_key = wl_key(sender_raw);
+
+    handle_request(
+        proof, payload, ps,
+        wallet_id_in, valid_until, seqno_in, policy_in, req_type,
+        blinded_preimage,
+        seqno, wid, policy, root, pub_seed, limit, next_leaf,
+        blinded_remaining,
+        wl_dict, blinded_dict,
+        AUTH_INTERNAL,
+        sender_key
+    );
+}
+
+;; ── GET methods ───────────────────────────────────────────────
+
+int seqno() method_id {
+    var (seqno, _, _, _, _, _, _, _, _, _) = load_storage();
+    return seqno;
+}
+
+int get_wallet_id() method_id {
+    var (_, wid, _, _, _, _, _, _, _, _) = load_storage();
+    return wid;
+}
+
+int get_policy_hash() method_id {
+    var (_, _, policy, _, _, _, _, _, _, _) = load_storage();
+    return policy;
+}
+
+int get_root() method_id {
+    var (_, _, _, root, _, _, _, _, _, _) = load_storage();
+    return root;
+}
+
+int get_public_seed() method_id {
+    var (_, _, _, _, pub_seed, _, _, _, _, _) = load_storage();
+    return pub_seed;
+}
+
+int get_leaf_limit() method_id {
+    var (_, _, _, _, _, limit, _, _, _, _) = load_storage();
+    return limit;
+}
+
+int get_next_leaf() method_id {
+    var (_, _, _, _, _, _, next_leaf, _, _, _) = load_storage();
+    return next_leaf;
+}
+
+int get_leaves_remaining() method_id {
+    var (_, _, _, _, _, limit, next_leaf, _, _, _) = load_storage();
+    return limit - next_leaf;
+}
+
+int get_tree_height() method_id {
+    return TREE_HEIGHT;
+}
+
+int is_whitelisted(slice addr) method_id {
+    var (_, _, _, _, _, _, _, _, wl_dict, _) = load_storage();
+    if (cell_null?(wl_dict)) { return 0; }
+    return wl_contains(wl_dict, addr);
+}
+
+int get_blinded_keys_remaining() method_id {
+    var (_, _, _, _, _, _, _, blinded_remaining, _, _) = load_storage();
+    return blinded_remaining;
+}

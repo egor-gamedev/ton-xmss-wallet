@@ -1,0 +1,724 @@
+#pragma version =0.4.4;
+#include "imports/stdlib.fc";
+
+;; ============================================================
+;; XMSS / WOTS+ WALLET v2 — production-ready, single-key
+;;
+;; Архитектура:
+;;   - Один XMSS-ключ (user). Высота дерева h=7 фиксирована (128 листьев макс.).
+;;   - Один ключ делает всё: transfer, rotate_root, whitelist.
+;;   - Admin-дерево, lock_wallet, admin_override — удалены.
+;;
+;; Исправления аудита v1:
+;;   [A1] Whitelist для recv_internal: проверка отправителя ДО accept_message().
+;;        Неавторизованный отправитель платит газ сам.
+;;        Для whitelist-чека читаем только Cell B из storage — дёшево.
+;;   [A2] Transfer: send_raw_message ДО save_storage/commit.
+;;        Если send упадёт — seqno не сожжён, лист не потерян.
+;;   [A3] Domain separation: hash_message включает хеш адреса контракта.
+;;        Защита от cross-wallet replay между разными экземплярами.
+;;   [A4] valid_until верхняя граница: MAX_VALID_UNTIL_DELTA = 86400 (24h).
+;;   [A5] rotate_root принимает новый policy_hash для нового дерева.
+;;   [A6] parse_body валидирует op внутри.
+;;   [A7] Merkle-путь: repeat(TREE_HEIGHT) — дешевле переменной h.
+;;   [G1] L-tree: двухфазный reduce (collect + level-reduce), ~2.9× дешевле.
+;;   [G2] Pre-validate proof header до accept_message() для external.
+;;   [G4] load_storage — ровно один вызов за транзакцию.
+;;
+;; Whitelist:
+;;   udict, ключ WL_KEY_BITS бит = MsgAddressInt (workchain:8 | addr_hash:256).
+;;   Если dict пуст — signed_internal закрыт для всех.
+;;   Управление: req::wl_add / req::wl_remove, подписанные user-ключом.
+;;   При проверке в recv_internal: парсим только Cell B (whitelist) — Cell A
+;;   не читается вовсе, что минимизирует газ на отклонение чужих сообщений.
+;;
+;; Rotate root:
+;;   Подписывается текущим ключом (полный XMSS verify).
+;;   Payload: new_root:256 | new_pub_seed:256 | new_limit:32 | new_policy:256
+;;   После rotate: next_leaf = 0, limit = new_limit (≤128), policy = new_policy.
+;;   Новый root верифицируется off-chain — стандартная схема XMSS.
+;;
+;; Transfer:
+;;   send_raw_message → save_storage → commit.
+;;
+;; Storage layout:
+;;   Cell A: version:8 | seqno:32 | wallet_id:32 | policy:256
+;;           | root:256 | pub_seed:256 | limit:32 | next_leaf:32
+;;           | ref → Cell B
+;;   Cell B: whitelist_dict (load_dict / store_dict)
+;;
+;; Incoming message body:
+;;   op:32 | ref[0]: XMSS proof | ref[1]: signed payload
+;;
+;; XMSS proof:
+;;   version:8 | idx:64 | pub_seed:256
+;;   | WOTS sig words (67 × 256-bit, chain-of-refs)
+;;   | auth path (7 × 256-bit, chain-of-refs)
+;;
+;; Signed payload:
+;;   wallet_id:32 | valid_until:32 | seqno:32 | policy:256 | req_type:8 | <поля>
+;; ============================================================
+
+;; -----------------------------------------------------------
+;; Коды ошибок
+;; -----------------------------------------------------------
+const int err::invalid_seqno        = 133;
+const int err::invalid_wallet_id    = 134;
+const int err::invalid_signature    = 135;
+const int err::expired              = 136;
+const int err::invalid_op           = 138;
+const int err::policy_mismatch      = 148;
+const int err::invalid_leaf_index   = 151;
+const int err::wallet_exhausted     = 153;
+const int err::invalid_proof_format = 154;
+const int err::bad_storage          = 156;
+const int err::bad_mode             = 157;
+const int err::not_whitelisted      = 158;
+
+;; -----------------------------------------------------------
+;; Op-коды
+;; -----------------------------------------------------------
+const int op::signed_external = 0x7369676E;
+const int op::signed_internal = 0x73696E74;
+
+;; -----------------------------------------------------------
+;; Типы запросов (req_type, 8 бит в payload)
+;; -----------------------------------------------------------
+const int req::transfer     = 0x00;
+const int req::rotate_root  = 0x01;
+const int req::wl_add       = 0x02;
+const int req::wl_remove    = 0x03;
+
+;; -----------------------------------------------------------
+;; Domain-теги для хеш-функций
+;; -----------------------------------------------------------
+const int tag::wots_chain = 0x574F4348;
+const int tag::ltree      = 0x4C545245;
+const int tag::merkle     = 0x4D52544C;
+const int tag::xmss_msg   = 0x584D5347;
+
+;; -----------------------------------------------------------
+;; XMSS / WOTS+ параметры
+;; -----------------------------------------------------------
+const int PROOF_VERSION  = 0x01;
+const int WOTS_W         = 16;
+const int WOTS_LEN1      = 64;
+const int WOTS_LEN2      = 3;
+const int WOTS_LEN       = 67;
+const int WOTS_CSUM_MAX  = 960;
+
+;; Дерево: h = 7 фиксировано, макс. 128 листьев.
+const int TREE_HEIGHT     = 7;
+const int TREE_MAX_LEAVES = 128;   ;; 1 << TREE_HEIGHT
+
+;; valid_until: не более 24 часов в будущем [A4]
+const int MAX_VALID_UNTIL_DELTA = 86400;
+
+;; Whitelist dict: ключ = workchain:8 | addr_hash:256 = 264 бита.
+;; Храним как uint с WL_KEY_BITS значащих бит.
+const int WL_KEY_BITS = 264;
+
+;; Смещение полей Cell A до ref на Cell B (для быстрого чтения whitelist).
+;; version:8 + seqno:32 + wallet_id:32 + policy:256 + root:256 + pub_seed:256
+;;   + limit:32 + next_leaf:32 = 904 бита
+const int CELL_A_BITS_BEFORE_REF = 904;
+
+;; -----------------------------------------------------------
+;; Утилиты
+;; -----------------------------------------------------------
+() _require(int cond, int exc) impure inline {
+    ifnot (cond) { throw(exc); }
+}
+
+;; -----------------------------------------------------------
+;; Хеш-примитивы
+;; -----------------------------------------------------------
+
+int chain_step(int r, int x) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::wots_chain, 32)
+            .store_uint(r, 256)
+            .store_uint(x, 256)
+        .end_cell()
+    );
+}
+
+int chain_iter(int r, int x, int steps) inline {
+    int i = 0;
+    while (i < steps) {
+        x = chain_step(r, x);
+        i += 1;
+    }
+    return x;
+}
+
+int rand_hash(int left, int right) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::merkle, 32)
+            .store_uint(left, 256)
+            .store_uint(right, 256)
+        .end_cell()
+    );
+}
+
+int ltree_hash(int left, int right) inline {
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::ltree, 32)
+            .store_uint(left, 256)
+            .store_uint(right, 256)
+        .end_cell()
+    );
+}
+
+;; [A3] hash_message включает хеш адреса контракта как domain separator.
+;; Предотвращает replay одной подписи на другом кошельке с тем же ключом.
+int hash_message(cell payload) inline {
+    int addr_hash = cell_hash(
+        begin_cell()
+            .store_slice(my_address())
+        .end_cell()
+    );
+    return cell_hash(
+        begin_cell()
+            .store_uint(tag::xmss_msg, 32)
+            .store_uint(addr_hash, 256)
+            .store_uint(cell_hash(payload), 256)
+        .end_cell()
+    );
+}
+
+;; -----------------------------------------------------------
+;; Чтение 256-битного слова из chain-of-refs
+;; -----------------------------------------------------------
+(int, slice) read_word(slice cs) inline {
+    if (slice_bits(cs) == 0) {
+        _require(slice_refs(cs) == 1, err::invalid_proof_format);
+        cs = begin_parse(cs~load_ref());
+    }
+    _require(slice_bits(cs) >= 256, err::invalid_proof_format);
+    return (cs~load_uint(256), cs);
+}
+
+;; -----------------------------------------------------------
+;; WOTS+ верификатор + двухфазный L-tree [G1]
+;;
+;; Фаза 1 (collect, O(n)):
+;;   Для каждого из 67 WOTS-слов вычисляем pk[i] = chain(sig[i], steps).
+;;   steps = (W-1-coef) где coef — соответствующий символ хеша (4 бита).
+;;   Собираем pk в плоский tuple.
+;;
+;; Фаза 2 (level-reduce, O(n)):
+;;   Попарно хешируем соседей ltree_hash(pk[2k], pk[2k+1]).
+;;   Нечётный последний элемент переносится на следующий уровень как есть.
+;;   Повторяем пока не останется один элемент — leaf.
+;;
+;; Итого ~3096 копий tuple-элементов vs ~9045 в наивном алгоритме.
+;; -----------------------------------------------------------
+(int, slice) verify_wots_plus(slice cs, int public_seed, int msg_hash) inline {
+    tuple pks = empty_tuple();
+    int sum   = 0;
+    int i     = 0;
+
+    ;; Фаза 1a: LEN1 слов по данным сообщения
+    while (i < WOTS_LEN1) {
+        int coef = (msg_hash >> ((WOTS_LEN1 - 1 - i) * 4)) & 15;
+        sum += coef;
+        var (sig, cs2) = read_word(cs);
+        cs = cs2;
+        pks = tpush(pks, chain_iter(public_seed, sig, WOTS_W - 1 - coef));
+        i += 1;
+    }
+
+    ;; Фаза 1b: LEN2 слов по контрольной сумме
+    int csum = WOTS_CSUM_MAX - sum;
+    int j = 0;
+    while (j < WOTS_LEN2) {
+        int coef = (csum >> ((WOTS_LEN2 - 1 - j) * 4)) & 15;
+        var (sig, cs2) = read_word(cs);
+        cs = cs2;
+        pks = tpush(pks, chain_iter(public_seed, sig, WOTS_W - 1 - coef));
+        j += 1;
+    }
+
+    ;; Фаза 2: L-tree level-reduce
+    int sz = WOTS_LEN;
+    while (sz > 1) {
+        tuple next = empty_tuple();
+        int k = 0;
+        while (k + 1 < sz) {
+            next = tpush(next, ltree_hash(pks.at(k), pks.at(k + 1)));
+            k += 2;
+        }
+        if (k < sz) {
+            next = tpush(next, pks.at(k));   ;; нечётный carry
+        }
+        pks = next;
+        sz  = (sz + 1) >> 1;
+    }
+
+    return (pks.at(0), cs);
+}
+
+;; -----------------------------------------------------------
+;; Merkle auth-path: h=7 фиксировано → repeat(TREE_HEIGHT) [A7]
+;; Дешевле чем while(level < h): компилятор раскрывает repeat в 7 итераций.
+;; -----------------------------------------------------------
+int verify_merkle_path(slice cs, int leaf, int idx, int root) inline {
+    int node = leaf;
+    int pos  = idx;
+
+    repeat(TREE_HEIGHT) {
+        var (sib, cs2) = read_word(cs);
+        cs = cs2;
+        node = (pos & 1) ? rand_hash(sib, node) : rand_hash(node, sib);
+        pos >>= 1;
+    }
+
+    _require(slice_bits(cs) == 0, err::invalid_proof_format);
+    _require(slice_refs(cs) == 0, err::invalid_proof_format);
+    _require(node == root,        err::invalid_signature);
+
+    return -1;
+}
+
+;; -----------------------------------------------------------
+;; Полная XMSS верификация
+;; -----------------------------------------------------------
+int verify_xmss(cell payload, cell proof, int root, int public_seed, int expected_idx) inline {
+    slice cs = begin_parse(proof);
+    _require(slice_bits(cs) >= (8 + 64 + 256), err::invalid_proof_format);
+
+    int version = cs~load_uint(8);
+    _require(version == PROOF_VERSION, err::invalid_proof_format);
+
+    int idx = cs~load_uint(64);
+    _require(idx == expected_idx, err::invalid_leaf_index);
+
+    int proof_pub_seed = cs~load_uint(256);
+    _require(proof_pub_seed == public_seed, err::invalid_signature);
+
+    var (leaf, cs2) = verify_wots_plus(cs, public_seed, hash_message(payload));
+    return verify_merkle_path(cs2, leaf, idx, root);
+}
+
+;; -----------------------------------------------------------
+;; [G2] Дешёвая предварительная проверка proof-заголовка.
+;; Вызывается ДО accept_message() для external.
+;; Проверяет version / idx / pub_seed без WOTS+ и Merkle.
+;; Невалидный заголовок → throw, газ платит отправитель.
+;; -----------------------------------------------------------
+() validate_proof_header(cell proof, int expected_idx, int expected_pub_seed) impure inline {
+    slice cs = begin_parse(proof);
+    _require(slice_bits(cs) >= (8 + 64 + 256), err::invalid_proof_format);
+
+    _require(cs~load_uint(8)  == PROOF_VERSION,    err::invalid_proof_format);
+    _require(cs~load_uint(64) == expected_idx,     err::invalid_leaf_index);
+    _require(cs~load_uint(256) == expected_pub_seed, err::invalid_signature);
+}
+
+;; -----------------------------------------------------------
+;; Storage
+;; -----------------------------------------------------------
+
+_ load_storage() inline {
+    slice a = begin_parse(get_data());
+    _require(slice_refs(a) == 1, err::bad_storage);
+
+    int version = a~load_uint(8);
+    _require(version == 1, err::bad_storage);
+
+    int seqno     = a~load_uint(32);
+    int wallet_id = a~load_uint(32);
+    int policy    = a~load_uint(256);
+    int root      = a~load_uint(256);
+    int pub_seed  = a~load_uint(256);
+    int limit     = a~load_uint(32);
+    int next_leaf = a~load_uint(32);
+    _require(slice_bits(a) == 0,          err::bad_storage);
+    _require(next_leaf <= limit,           err::bad_storage);
+    _require(limit <= TREE_MAX_LEAVES,     err::bad_storage);
+
+    slice b = begin_parse(a~load_ref());
+    cell wl_dict = b~load_dict();
+    _require(slice_bits(b) == 0,  err::bad_storage);
+    _require(slice_refs(b) == 0,  err::bad_storage);
+
+    return (seqno, wallet_id, policy, root, pub_seed, limit, next_leaf, wl_dict);
+}
+
+() save_storage(
+    int seqno, int wallet_id, int policy,
+    int root,  int pub_seed,  int limit, int next_leaf,
+    cell wl_dict
+) impure inline {
+    set_data(
+        begin_cell()
+            .store_uint(1,          8)
+            .store_uint(seqno,     32)
+            .store_uint(wallet_id, 32)
+            .store_uint(policy,   256)
+            .store_uint(root,     256)
+            .store_uint(pub_seed, 256)
+            .store_uint(limit,     32)
+            .store_uint(next_leaf, 32)
+            .store_ref(
+                begin_cell()
+                    .store_dict(wl_dict)
+                .end_cell()
+            )
+        .end_cell()
+    );
+}
+
+;; Вызывается off-chain при формировании StateInit.
+cell build_initial_data(
+    int wallet_id,
+    int policy, int root, int pub_seed, int limit
+) inline {
+    _require(limit > 0,                err::wallet_exhausted);
+    _require(limit <= TREE_MAX_LEAVES, err::wallet_exhausted);
+
+    return begin_cell()
+        .store_uint(1,          8)
+        .store_uint(0,         32)   ;; seqno = 0
+        .store_uint(wallet_id, 32)
+        .store_uint(policy,   256)
+        .store_uint(root,     256)
+        .store_uint(pub_seed, 256)
+        .store_uint(limit,     32)
+        .store_uint(0,         32)   ;; next_leaf = 0
+        .store_ref(
+            begin_cell()
+                .store_dict(new_dict())   ;; whitelist пуст
+            .end_cell()
+        )
+    .end_cell();
+}
+
+;; -----------------------------------------------------------
+;; Whitelist helpers
+;;
+;; Ключ словаря: workchain(8) | addr_hash(256) = 264 бита, uint.
+;; MsgAddressInt wire-format: tag(2=10b) | anycast(1b=0) | wc(8) | hash(256).
+;; Итого 267 бит в slice, мы берём последние 264 (без tag+anycast).
+;; -----------------------------------------------------------
+int wl_pack_key(slice addr) inline {
+    addr~load_bits(3);                 ;; пропустить tag(2) + anycast_flag(1)
+    int wc   = addr~load_int(8);
+    int hash = addr~load_uint(256);
+    ;; wc знаковое, но для dict-ключа нужен uint.
+    ;; Кодируем: ((wc & 0xFF) << 256) | hash — 264 бита.
+    return ((wc & 0xFF) << 256) | hash;
+}
+
+int wl_contains(cell wl_dict, slice addr) inline {
+    if (cell_null?(wl_dict)) { return 0; }
+    var (_, found) = udict_get?(wl_dict, WL_KEY_BITS, wl_pack_key(addr));
+    return found;
+}
+
+cell wl_set(cell wl_dict, slice addr) inline {
+    wl_dict~udict_set(WL_KEY_BITS, wl_pack_key(addr),
+        begin_cell().end_cell().begin_parse());
+    return wl_dict;
+}
+
+cell wl_del(cell wl_dict, slice addr) inline {
+    wl_dict~udict_delete?(WL_KEY_BITS, wl_pack_key(addr));
+    return wl_dict;
+}
+
+;; Валидация slice адреса: должен быть addr_std (tag=10b).
+() require_addr_std(slice addr) impure inline {
+    _require(slice_bits(addr) >= (2 + 1 + 8 + 256), err::invalid_op);
+    _require(addr.preload_uint(2) == 2, err::invalid_op);
+}
+
+;; -----------------------------------------------------------
+;; Whitelist: быстрая загрузка только для проверки в recv_internal.
+;; Читаем только Cell B, пропуская все поля Cell A.
+;; Газ: ~5 инструкций вместо полного load_storage.
+;; -----------------------------------------------------------
+cell load_wl_only() inline {
+    slice a = begin_parse(get_data());
+    _require(slice_refs(a) == 1, err::bad_storage);
+    a~load_bits(CELL_A_BITS_BEFORE_REF);
+    slice b = begin_parse(a~load_ref());
+    return b~load_dict();
+}
+
+;; -----------------------------------------------------------
+;; Allowed send_mode whitelist [S3]
+;; Mode 130 (destroy) запрещён: уничтожение XMSS-кошелька необратимо,
+;; т.к. ключ h=7 использует конечное число листьев.
+;; -----------------------------------------------------------
+() validate_send_mode(int mode) impure inline {
+    int ok = (mode == 0)  | (mode == 1)  | (mode == 2)  |
+             (mode == 64) | (mode == 65) | (mode == 66) |
+             (mode == 128);
+    _require(ok, err::bad_mode);
+}
+
+;; -----------------------------------------------------------
+;; Парсинг тела сообщения [A6]
+;; op валидируется внутри.
+;; -----------------------------------------------------------
+(cell, cell, slice, int, int, int, int, int) parse_body(slice body, int expected_op) inline {
+    _require(slice_bits(body) >= 32, err::invalid_op);
+    _require(body~load_uint(32) == expected_op, err::invalid_op);
+
+    _require(slice_refs(body) >= 2, err::invalid_op);
+    cell proof   = body~load_ref();
+    cell payload = body~load_ref();
+    _require(slice_bits(body) == 0, err::invalid_op);
+    _require(slice_refs(body) == 0, err::invalid_op);
+
+    slice ps = begin_parse(payload);
+    _require(slice_bits(ps) >= (32 + 32 + 32 + 256 + 8), err::invalid_op);
+
+    int wallet_id   = ps~load_uint(32);
+    int valid_until = ps~load_uint(32);
+    int seqno_in    = ps~load_uint(32);
+    int policy_in   = ps~load_uint(256);
+    int req_type    = ps~load_uint(8);
+
+    return (proof, payload, ps, wallet_id, valid_until, seqno_in, policy_in, req_type);
+}
+
+;; -----------------------------------------------------------
+;; Общие cheap-проверки (до verify_xmss)
+;; -----------------------------------------------------------
+() check_common(
+    int wallet_id_in, int valid_until, int seqno_in, int policy_in,
+    int wid, int seqno, int policy
+) impure inline {
+    _require(seqno_in    == seqno,                         err::invalid_seqno);
+    _require(wallet_id_in == wid,                          err::invalid_wallet_id);
+    _require(valid_until  >  now(),                        err::expired);
+    _require(valid_until  <= now() + MAX_VALID_UNTIL_DELTA, err::expired);
+    _require(policy_in    == policy,                       err::policy_mismatch);
+}
+
+;; -----------------------------------------------------------
+;; Ядро обработки запросов
+;;
+;; Порядок для external:
+;;   1. check_common (seqno, wallet_id, valid_until, policy)  — бесплатно
+;;   2. _require(next_leaf < limit)                           — бесплатно
+;;   3. validate_proof_header (version, idx, pub_seed)        — бесплатно
+;;   4. accept_message()                                       — газ принят
+;;   5. verify_xmss (WOTS+ + Merkle)                          — дорого
+;;   6. исполнение запроса
+;;
+;; Порядок для internal:
+;;   Whitelist уже проверен в recv_internal до вызова handle_request.
+;;   1–2. check_common + leaf check   — то же
+;;   3. (нет validate_proof_header)
+;;   4. (нет accept_message)
+;;   5–6. verify_xmss + исполнение
+;; -----------------------------------------------------------
+() handle_request(
+    cell proof, cell payload, slice ps,
+    int wallet_id_in, int valid_until, int seqno_in, int policy_in, int req_type,
+    int seqno, int wid, int policy,
+    int root, int pub_seed, int limit, int next_leaf,
+    cell wl_dict,
+    int is_external
+) impure {
+
+    check_common(wallet_id_in, valid_until, seqno_in, policy_in, wid, seqno, policy);
+    _require(next_leaf < limit, err::wallet_exhausted);
+
+    if (is_external) {
+        validate_proof_header(proof, next_leaf, pub_seed);
+        accept_message();
+    }
+
+    _require(
+        verify_xmss(payload, proof, root, pub_seed, next_leaf) == -1,
+        err::invalid_signature
+    );
+
+    int new_seqno    = seqno + 1;
+    int new_next     = next_leaf + 1;
+
+    ;; ── Исполнение ─────────────────────────────────────────
+
+    if (req_type == req::transfer) {
+        ;; [A2] send_raw_message ДО save_storage:
+        ;; если ячейка out_msg невалидна и send упадёт —
+        ;; seqno и next_leaf не сохранены, лист XMSS не потерян.
+        _require(slice_bits(ps) >= 8, err::invalid_op);
+        int mode = ps~load_uint(8);
+        validate_send_mode(mode);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        cell out_msg = ps~load_ref();
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 0, err::invalid_op);
+
+        send_raw_message(out_msg, mode);
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next, wl_dict);
+        commit();
+
+    } elseif (req_type == req::rotate_root) {
+        ;; [A5] Принимаем новые: root, pub_seed, limit, policy.
+        ;; Payload: new_root:256 | new_pub_seed:256 | new_limit:32 | new_policy:256
+        _require(slice_bits(ps) >= (256 + 256 + 32 + 256), err::invalid_op);
+        int new_root     = ps~load_uint(256);
+        int new_pub_seed = ps~load_uint(256);
+        int new_limit    = ps~load_uint(32);
+        int new_policy   = ps~load_uint(256);
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 0, err::invalid_op);
+
+        _require(new_limit > 0,                err::wallet_exhausted);
+        _require(new_limit <= TREE_MAX_LEAVES, err::wallet_exhausted);
+
+        ;; next_leaf нового дерева = 0. seqno продолжается.
+        save_storage(new_seqno, wid, new_policy, new_root, new_pub_seed, new_limit, 0, wl_dict);
+        commit();
+
+    } elseif (req_type == req::wl_add) {
+        ;; Payload: ref с MsgAddressInt
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        slice addr = begin_parse(ps~load_ref());
+        require_addr_std(addr);
+
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next,
+            wl_set(wl_dict, addr));
+        commit();
+
+    } elseif (req_type == req::wl_remove) {
+        ;; Payload: ref с MsgAddressInt
+        _require(slice_bits(ps) == 0, err::invalid_op);
+        _require(slice_refs(ps) == 1, err::invalid_op);
+        slice addr = begin_parse(ps~load_ref());
+        require_addr_std(addr);
+
+        save_storage(new_seqno, wid, policy, root, pub_seed, limit, new_next,
+            wl_del(wl_dict, addr));
+        commit();
+
+    } else {
+        throw(err::invalid_op);
+    }
+}
+
+;; -----------------------------------------------------------
+;; Entry points
+;; -----------------------------------------------------------
+
+() recv_external(slice in_msg) impure {
+    if (slice_bits(in_msg) < 32) { return (); }
+    if (in_msg.preload_uint(32) != op::signed_external) { return (); }
+
+    var (proof, payload, ps, wallet_id_in, valid_until, seqno_in, policy_in, req_type)
+        = parse_body(in_msg, op::signed_external);
+
+    var (seqno, wid, policy, root, pub_seed, limit, next_leaf, wl_dict)
+        = load_storage();
+
+    handle_request(
+        proof, payload, ps,
+        wallet_id_in, valid_until, seqno_in, policy_in, req_type,
+        seqno, wid, policy, root, pub_seed, limit, next_leaf, wl_dict,
+        true
+    );
+}
+
+() recv_internal(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    ;; Дроп bounce
+    slice hdr = begin_parse(in_msg_full);
+    int flags = hdr~load_uint(4);
+    if (flags & 1) { return (); }
+
+    if (slice_bits(in_msg_body) < 32) { return (); }
+    if (in_msg_body.preload_uint(32) != op::signed_internal) { return (); }
+
+    ;; [A1] Whitelist-проверка ДО полного парсинга и ДО WOTS+.
+    ;; Читаем только Cell B (whitelist dict) — минимальный газ.
+    ;; Если отправитель не в whitelist — throw: газ платит он сам.
+    cell wl = load_wl_only();
+    _require(~ cell_null?(wl), err::not_whitelisted);
+
+    ;; Извлекаем адрес отправителя из заголовка сообщения.
+    ;; hdr уже после flags(4). Далее: ihr_disabled(1) | bounce(1) | bounced(1)
+    ;; | src:MsgAddress | ...
+    hdr~load_bits(3);
+    slice sender = hdr~load_msg_addr();
+    _require(wl_contains(wl, sender), err::not_whitelisted);
+
+    ;; Отправитель авторизован — полный парсинг
+    var (proof, payload, ps, wallet_id_in, valid_until, seqno_in, policy_in, req_type)
+        = parse_body(in_msg_body, op::signed_internal);
+
+    var (seqno, wid, policy, root, pub_seed, limit, next_leaf, wl_dict)
+        = load_storage();
+
+    handle_request(
+        proof, payload, ps,
+        wallet_id_in, valid_until, seqno_in, policy_in, req_type,
+        seqno, wid, policy, root, pub_seed, limit, next_leaf, wl_dict,
+        false
+    );
+}
+
+;; -----------------------------------------------------------
+;; GET-методы
+;; -----------------------------------------------------------
+
+int seqno() method_id {
+    var (seqno, _, _, _, _, _, _, _) = load_storage();
+    return seqno;
+}
+
+int get_wallet_id() method_id {
+    var (_, wid, _, _, _, _, _, _) = load_storage();
+    return wid;
+}
+
+int get_policy_hash() method_id {
+    var (_, _, policy, _, _, _, _, _) = load_storage();
+    return policy;
+}
+
+int get_root() method_id {
+    var (_, _, _, root, _, _, _, _) = load_storage();
+    return root;
+}
+
+int get_public_seed() method_id {
+    var (_, _, _, _, pub_seed, _, _, _) = load_storage();
+    return pub_seed;
+}
+
+int get_leaf_limit() method_id {
+    var (_, _, _, _, _, limit, _, _) = load_storage();
+    return limit;
+}
+
+int get_next_leaf() method_id {
+    var (_, _, _, _, _, _, next_leaf, _) = load_storage();
+    return next_leaf;
+}
+
+int get_leaves_remaining() method_id {
+    var (_, _, _, _, _, limit, next_leaf, _) = load_storage();
+    return limit - next_leaf;
+}
+
+int get_tree_height() method_id {
+    return TREE_HEIGHT;
+}
+
+;; Возвращает -1 если адрес в whitelist, 0 если нет.
+;; addr — MsgAddressInt в виде slice (тег 2 бит + anycast + wc:8 + hash:256).
+int is_whitelisted(slice addr) method_id {
+    var (_, _, _, _, _, _, _, wl_dict) = load_storage();
+    if (cell_null?(wl_dict)) { return 0; }
+    return wl_contains(wl_dict, addr);
+}

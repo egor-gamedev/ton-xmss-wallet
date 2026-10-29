@@ -42,11 +42,11 @@ reverts state, so the same message stays acceptable.
 
 - **Forged proof:** an attacker who sees any pending signed message (externals are public)
   copies its header and blinded preimage, garbles the signature, and sends it. Each copy is
-  accepted, fails with exit 135, and costs the wallet ≈ **0.24 TON**. It can be repeated
+  accepted, fails with exit 135, and costs the wallet ≈ **0.04 GRAM**. It can be repeated
   until the genuine message lands and bumps `seqno`. Sending externals costs the attacker nothing.
 - **Expired message replay:** `valid_until` is checked after accept. If a signed message is
   not included before it expires, **anyone holding its bytes can replay it indefinitely**;
-  each replay fails with exit 136 and costs the wallet ≈ 0.24 TON — until the owner sends a
+  each replay fails with exit 136 and costs the wallet ≈ 0.04 GRAM — until the owner sends a
   new successful transaction (which itself re-uses the leaf, see issue 3).
 - **Exhausted wallet:** `next_leaf < limit` is also checked post-accept, so a fully exhausted
   wallet can be drained the same way by replaying a message signed for leaf `limit`.
@@ -88,12 +88,14 @@ grinds digests.
 - Never run two signers (devices, backends) for the same key set concurrently: both would
   read the same `next_leaf` and sign different messages with it.
 
-### 4. Relayer minimum value is too low — LOW (*verified*)
+### 4. Relayer value depends on the gas price — LOW (*verified*)
 
-`MIN_INTERNAL_MSG_VALUE` is 0.05 TON, but internal processing does not call `accept_message`,
-so gas is limited to `msg_value / gas_price`. Verification needs ~0.2–0.4 TON. With 0.1 TON
-the transaction runs out of gas (exit −14) and nothing happens. Relayers should attach
-**≥ 0.4 TON**; the unused remainder stays in the wallet (no refund).
+Internal processing does not call `accept_message`, so gas is limited to
+`msg_value / gas_price`. At today's 66.67 nanoGRAM/gas the hard-coded minimum of 0.05 GRAM
+buys 750k gas, which covers a normal request (540–660k) — verified by a test. Before the 2026
+gas-price cut (400 nanoTON/gas) it bought only 125k gas and every relayed request failed with
+exit −14. Relayers should attach **≥ 0.07 GRAM** (covers the full 1M gas limit) and re-check
+this if the network gas price is ever raised. The unused remainder stays in the wallet.
 
 ### 5. Signatures are not network-bound — MEDIUM
 

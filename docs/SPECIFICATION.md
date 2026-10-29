@@ -141,7 +141,7 @@ After `accept_message` (paid from the wallet balance) — `handle_request`:
 ### recv_internal
 
 - Bounced messages and bodies without op `sint` are accepted silently (top-ups).
-- `msg_value ≥ 0.05 TON` (but see SECURITY.md: real gas needs ≈ 0.25–0.4 TON),
+- `msg_value ≥ 0.05 GRAM` (gas is capped at `msg_value / gas_price`; attach ≥ 0.07 GRAM to cover 1M gas),
   sender must be whitelisted, blinded key present, then `handle_request` with `auth_mode = 2`.
   No `accept_message`: gas is bounded by `msg_value / gas_price`.
 
@@ -179,7 +179,7 @@ There is no `get_public_key` and no TON wallet-standard interface.
 | 156 | bad_storage | storage parsing |
 | 157 | bad_mode | send mode not allowed |
 | 158 | not_whitelisted | internal from unknown sender |
-| 159 | insufficient_value | internal with < 0.05 TON |
+| 159 | insufficient_value | internal with < 0.05 GRAM |
 | 160 | invalid_blinded_key | unknown/consumed blinded key, or bad rotate count |
 
 ## 7. Off-chain key derivation (SDK convention)

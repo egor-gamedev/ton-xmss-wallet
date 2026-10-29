@@ -98,7 +98,7 @@ function main() {
     console.log(`\nSaved: ${KEYS_FILE} (secret), ${RECOVERY_FILE} (secret), ${DEPLOY_FILE}`);
     console.log('\nNext:');
     console.log(
-        `  1. Send at least 1 TON to ${fundingAddress} (each operation costs ~0.25 TON in fees).`
+        `  1. Send at least 0.5 GRAM to ${fundingAddress} (each operation costs ~0.04 GRAM in fees).`
     );
     console.log(
         `  2. TO=<address> AMOUNT=0.1 npx blueprint run transfer --${network} --tonconnect`

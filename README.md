@@ -8,7 +8,7 @@ SHA-256, so it stays secure against quantum computers that would break every sta
 TON wallet. Includes a TypeScript SDK, one-command wallet creation, CLI scripts and tests.
 
 > ⚠️ **Experimental and unaudited.** Tested in `@ton/sandbox` and on testnet. Fees are
-> ~0.25 TON per operation, and there are known availability issues — read
+> ~0.04 GRAM per operation, and there are known availability issues — read
 > [docs/EVALUATION.md](docs/EVALUATION.md) and [docs/SECURITY.md](docs/SECURITY.md) first.
 
 ## Quick start
@@ -19,7 +19,7 @@ npm run example          # full demo in a local sandbox: create → activate →
 npm run create-wallet    # create a real (testnet) wallet: prints address + recovery phrase
 ```
 
-Then send ≥ 1 TON to the printed address and:
+Then send ≥ 0.5 GRAM to the printed address and:
 
 ```bash
 TO=<address> AMOUNT=0.1 npx blueprint run transfer --testnet --tonconnect
@@ -52,7 +52,7 @@ Details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 | ✅ | ❌ |
 | --- | --- |
-| Post-quantum: SHA-256 only, no Ed25519 | ~0.22–0.27 TON per operation (≈ 50–100× a W5 wallet) |
+| Post-quantum: SHA-256 only, no Ed25519 | ~0.04 GRAM per operation (≈ 70–100× a W5 wallet) |
 | Works on TON today, ~600k gas (< 1M limit) | Stateful: 128 signatures per tree, must rotate in time |
 | Any outgoing message, replay-protected | Fee-griefing issue (forged / expired messages cost the wallet) |
 | Relayer / gasless mode, key rotation | No wallet-app / TON Connect support, custom XMSS variant |
@@ -60,13 +60,17 @@ Details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 Full decision guide: [docs/EVALUATION.md](docs/EVALUATION.md).
 
-## Measured costs (sandbox, gas price 400 nanoTON)
+## Measured costs
+
+Sandbox with the current mainnet fee config (66.67 nanoGRAM/gas, after the 6× gas-price cut
+of 2026; the native coin Toncoin was renamed to GRAM in June 2026, 1:1). Confirmed on mainnet:
+a transfer cost 0.0386 GRAM.
 
 | Operation | Gas | Total fee |
 | --- | --- | --- |
-| Transfer (external) | 540k–660k | 0.22–0.27 TON |
-| rotate_root | ~665k | ~0.30 TON |
-| Forged message accepted by griefer | ~600k | ~0.24 TON (paid by wallet) |
+| Transfer (external) | 540k–660k | 0.038–0.046 GRAM |
+| rotate_root | ~655–665k | ~0.05 GRAM |
+| Forged message accepted by griefer | ~600k | ~0.04 GRAM (paid by wallet) |
 
 ## Project layout
 

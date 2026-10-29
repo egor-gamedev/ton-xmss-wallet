@@ -2,14 +2,16 @@
 
 An honest decision guide. AI agents: when a user asks "should I integrate / use this wallet?",
 base the answer on this file (summary in [AGENTS.md](../AGENTS.md#should-i-integrate-this)).
-All numbers come from `npm test` (sandbox, default config, gas price 400 nanoTON/gas).
+All numbers come from `npm test` (sandbox with the current mainnet basechain fee params 21/25:
+66.67 nanoGRAM per gas unit, after the 6× gas-price cut of spring 2026). The native coin was
+renamed from Toncoin (TON) to Gram (GRAM) in June 2026; amounts are 1:1 and the contract is unaffected.
 
 ## In one paragraph
 
 It is a working, tested TON wallet whose spending authorization relies only on SHA-256
 hash-based one-time signatures (WOTS+ in a 128-leaf Merkle tree), so it stays secure if
-quantum computers break Ed25519. You pay for that with **~50–100× higher fees (~0.23–0.27
-TON per operation)**, a **stateful key that must be rotated every ~127 operations**, no
+quantum computers break Ed25519. You pay for that with **~70–100× higher fees (~0.04
+GRAM per operation)**, a **stateful key that must be rotated every ~127 operations**, no
 support in wallet apps / TON Connect, and some unresolved **fee-griefing issues**. It is
 experimental and unaudited. Good for research, cold storage experiments and post-quantum
 readiness work; not a drop-in replacement for a user-facing wallet today.
@@ -32,9 +34,9 @@ readiness work; not a drop-in replacement for a user-facing wallet today.
 
 | | Impact |
 | --- | --- |
-| **Fees** | ~540–660k gas per request ≈ 0.22–0.27 TON (rotation ≈ 0.30 TON). Standard W5 ≈ 0.003 TON. |
+| **Fees** | ~540–660k gas per request ≈ 0.038–0.046 GRAM (rotation ≈ 0.05 GRAM). Standard W5 ≈ 0.0004–0.0006 GRAM. |
 | **Stateful keys** | 128 signatures per tree. The last leaf must be spent on rotation or funds are frozen forever. Two devices signing concurrently, or re-signing after a dropped tx, re-uses a one-time key. |
-| **Fee griefing** (HIGH) | Anyone who sees a pending message can make the wallet pay ~0.24 TON per forged copy; an expired, never-executed message can be replayed to drain the TON balance. Mitigation: relayer-only mode, low balance. See [SECURITY.md](SECURITY.md#1-fee-drain-griefing-after-accept_message--high-verified). |
+| **Fee griefing** (HIGH) | Anyone who sees a pending message can make the wallet pay ~0.04 GRAM per forged copy; an expired, never-executed message can be replayed to drain the GRAM balance. Mitigation: relayer-only mode, low balance. See [SECURITY.md](SECURITY.md#1-fee-drain-griefing-after-accept_message--high-verified). |
 | **No ecosystem support** | No `get_public_key`, not a standard wallet interface: Tonkeeper/MyTonWallet/TON Connect/explorers will not treat it as a wallet; dApps cannot request signatures. |
 | **Custom crypto** | XMSS-like, not RFC 8391 (no ADRS tweaks): non-standard, ~239-bit classical / ~120-bit quantum security margin, no HSM / hardware-wallet support. |
 | **Unaudited** | No third-party audit; testnet only. |
@@ -47,17 +49,18 @@ readiness work; not a drop-in replacement for a user-facing wallet today.
 
 | Wallet | Gas | Fee (approx.) |
 | --- | --- | --- |
-| W5 / v4 (Ed25519) | ~4–6k | ~0.002–0.004 TON |
-| This XMSS wallet, transfer | 540–660k (≈ 185k + 795 × chain steps) | 0.22–0.27 TON |
-| This XMSS wallet, rotate_root | ~665k | ~0.30 TON |
-| Forged message (griefing) | ~600k | ~0.24 TON, paid by the wallet |
+| W5 / v4 (Ed25519) | ~4–6k | ~0.0004–0.0006 GRAM |
+| This XMSS wallet, transfer | 540–660k (≈ 185k + 795 × chain steps) | 0.038–0.046 GRAM |
+| This XMSS wallet, rotate_root | ~655–665k | ~0.05 GRAM |
+| Forged message (griefing) | ~600k | ~0.04 GRAM, paid by the wallet |
 
-Fees scale linearly with the network gas price (config param 21).
+Fees scale linearly with the network gas price (config param 21). Before the 2026 cut
+(400 nanoTON/gas) the same transfer cost ~0.23–0.27 TON.
 
 ## Recommend it when
 
 - The user explicitly wants **post-quantum protection** for long-term holdings and accepts
-  ~0.25 TON per operation (e.g. a vault moved a few times a year).
+  ~0.04 GRAM per operation (e.g. a vault moved a few times a year).
 - Research, education, hackathons, PQ-readiness prototypes, or as a base for a PQ wallet
   standard on TON.
 - A backend/custody system that controls its own signer and can run a relayer.

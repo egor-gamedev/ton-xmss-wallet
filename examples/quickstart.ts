@@ -8,6 +8,7 @@ import { Blockchain } from '@ton/sandbox';
 import { Cell, fromNano, internal, toNano } from '@ton/core';
 import compiled from '../build/xmss_wallet.compiled.json';
 import { assertLeafBudget, createWallet, signRequest, WalletRequest } from '../src';
+import { useMainnetFees } from '../tests/network-config';
 
 async function main() {
     const code = Cell.fromHex(compiled.hex);
@@ -26,6 +27,7 @@ async function main() {
 
     // 2. Fund the (not yet deployed) address with a non-bounceable transfer.
     const chain = await Blockchain.create();
+    useMainnetFees(chain); // current mainnet gas prices
     const funder = await chain.treasury('funder');
     const alice = await chain.treasury('alice');
     await funder.send({ to: created.address, value: toNano('5'), bounce: false });
@@ -58,7 +60,7 @@ async function main() {
         mode: 1,
         message: internal({ to: alice.address, value: toNano('1'), bounce: false })
     });
-    console.log(`transfer #1 (activates the wallet): fee ${fromNano(fee1)} TON`);
+    console.log(`transfer #1 (activates the wallet): fee ${fromNano(fee1)} GRAM`);
 
     const fee2 = await send({
         type: 'transfer',
@@ -69,13 +71,13 @@ async function main() {
             body: 'hello from a post-quantum wallet'
         })
     });
-    console.log(`transfer #2: fee ${fromNano(fee2)} TON`);
+    console.log(`transfer #2: fee ${fromNano(fee2)} GRAM`);
 
     console.log('leaves remaining:', await wallet.getLeavesRemaining(), '/ 128');
     console.log(
         'wallet balance:  ',
         fromNano((await chain.getContract(wallet.address)).balance),
-        'TON'
+        'GRAM'
     );
 }
 

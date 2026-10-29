@@ -98,9 +98,10 @@ await send({
 
 1. Whitelist the relayer: `{ type: 'wl_add', address: relayer }` (or pass `whitelist` at creation).
 2. The user signs with `authMode: AUTH.INTERNAL` and hands `signed.body` to the relayer.
-3. The relayer sends it: `wallet.sendInternalSigned(via, body, toNano('0.4'))`.
-   Attach **≥ 0.4 TON**: no `accept_message` in this path, so gas is capped by the value;
-   with 0.1 TON it fails with exit −14. The remainder stays in the user wallet.
+3. The relayer sends it: `wallet.sendInternalSigned(via, body, toNano('0.07'))`.
+   Attach **≥ 0.07 GRAM**: no `accept_message` in this path, so gas is capped by
+   `value / gas_price`; 0.07 GRAM covers the full 1M gas limit at 66.67 nanoGRAM/gas.
+   Too little value fails with exit −14 (out of gas). The remainder stays in the user wallet.
 
 The relayer cannot alter the request (it is signed) and cannot replay it (seqno). To remove
 external-message griefing entirely, compile with `ALLOW_EXTERNAL = 0` (new code hash /

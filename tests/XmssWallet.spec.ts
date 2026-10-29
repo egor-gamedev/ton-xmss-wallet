@@ -1,6 +1,7 @@
 import { Blockchain, SandboxContract, SendMessageResult, TreasuryContract } from '@ton/sandbox';
 import { beginCell, Cell, fromNano, internal, toNano } from '@ton/core';
 import { compile } from '@ton/blueprint';
+import { useMainnetFees } from './network-config';
 import '@ton/test-utils';
 import {
     AUTH,
@@ -106,6 +107,7 @@ describe('XmssWallet', () => {
 
     beforeEach(async () => {
         blockchain = await Blockchain.create();
+        useMainnetFees(blockchain);
         blockchain.now = Math.floor(Date.now() / 1000);
         deployer = await blockchain.treasury('deployer');
         relayer = await blockchain.treasury('relayer');
@@ -303,19 +305,17 @@ describe('XmssWallet', () => {
             expect(await wallet.getSeqno()).toBe(1);
         });
 
-        it('KNOWN ISSUE: the 0.05 TON minimum does not cover verification gas', async () => {
+        it('the 0.05 minimum covers verification gas at current prices (it did not before the 2026 cut)', async () => {
+            // No accept_message on this path: gas is capped at msg_value / gas_price.
+            // 0.05 GRAM / 66.67 nanoGRAM = 750k gas; at the old 400 nanoTON it was only 125k.
             const signed = await sign(transfer('1'), { authMode: AUTH.INTERNAL });
             const r = await wallet.sendInternalSigned(
                 relayer.getSender(),
                 signed.body,
-                toNano('0.1')
+                toNano('0.05')
             );
-            expect(r.transactions).toHaveTransaction({
-                to: wallet.address,
-                success: false,
-                exitCode: -14
-            });
-            expect(await wallet.getSeqno()).toBe(0);
+            expect(r.transactions).toHaveTransaction({ to: wallet.address, success: true });
+            expect(await wallet.getSeqno()).toBe(1);
         });
 
         it('a non-whitelisted sender is rejected with exit 158', async () => {

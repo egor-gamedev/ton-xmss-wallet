@@ -48,10 +48,10 @@ export class XmssWallet implements Contract {
 
     /**
      * Relays a body produced by signRequest(..., authMode: AUTH.INTERNAL).
-     * `via` must be whitelisted; `value` pays the gas (min 0.05 TON).
+     * `via` must be whitelisted; `value` pays the gas: attach >= 0.07 GRAM (covers 1M gas).
      */
     async sendInternalSigned(provider: ContractProvider, via: Sender, body: Cell, value: bigint) {
-        if (value < MIN_INTERNAL_MSG_VALUE) throw new Error('value must be >= 0.05 TON');
+        if (value < MIN_INTERNAL_MSG_VALUE) throw new Error('value must be >= 0.05 GRAM');
         await provider.internal(via, { value, sendMode: SendMode.PAY_GAS_SEPARATELY, body });
     }
 

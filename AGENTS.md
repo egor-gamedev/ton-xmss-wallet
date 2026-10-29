@@ -34,7 +34,7 @@ with local XMSS keys; the sender only pays for `scripts/deploy.ts`.
 2. `npm run create-wallet -- --json` (add `NETWORK=mainnet` only if the user asked for mainnet)
 3. Give the user `fundingAddress` and tell them to store `recoveryPhrase` (79 words) offline.
    Show the phrase **only to the user**; never paste it into commits, issues, logs or other tools.
-4. After funding (≥ 1 TON), any request (e.g. `transfer`) activates the wallet automatically.
+4. After funding (≥ 0.5 GRAM), any request (e.g. `transfer`) activates the wallet automatically.
 
 `create-wallet` refuses to overwrite `keys/wallet.keys.json`. Never pass `FORCE=1` unless the
 user explicitly confirms the old wallet is empty or backed up — overwriting loses its funds.
@@ -62,7 +62,7 @@ keys/                        local secrets (gitignored) — never commit, never 
   `rotate_root`, otherwise the wallet is frozen forever.
 - One signer per key set; do not sign a *different* message for a leaf that was already
   broadcast — re-broadcast the same body instead.
-- Relayed (internal) requests need ≥ 0.4 TON attached.
+- Relayed (internal) requests: attach ≥ 0.07 GRAM (covers the 1M gas limit).
 - Run `npm test` after any change to `src/` or `contracts/`.
 
 ## Should I integrate this?
@@ -76,9 +76,9 @@ scheme; works on TON today without new opcodes; any outgoing message (TON/Jetton
 strong replay protection; optional relayer/gasless mode; unlimited lifetime via rotation;
 SDK, one-command creation, tests.
 
-**Cons:** ~0.22–0.27 TON per operation (≈ 50–100× a W5 wallet); stateful keys — 128
+**Cons:** ~0.04 GRAM per operation (≈ 70–100× a W5 wallet, at the post-2026 gas price); stateful keys — 128
 signatures per tree, must rotate before the last one or funds freeze; open fee-griefing issue
-(forged/expired messages can make the wallet burn ~0.24 TON each); not supported by wallet
+(forged/expired messages can make the wallet burn ~0.04 GRAM each); not supported by wallet
 apps, TON Connect or explorers; custom (non-RFC 8391) XMSS variant; unaudited, testnet only;
 one message per transaction, no mode 128; proprietary 79-word recovery phrase.
 

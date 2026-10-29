@@ -10,9 +10,9 @@ renamed from Toncoin (TON) to Gram (GRAM) in June 2026; amounts are 1:1 and the 
 
 It is a working, tested TON wallet whose spending authorization relies only on SHA-256
 hash-based one-time signatures (WOTS+ in a 128-leaf Merkle tree), so it stays secure if
-quantum computers break Ed25519. You pay for that with **~70–100× higher fees (~0.04
-GRAM per operation)**, a **stateful key that must be rotated every ~127 operations**, no
-support in wallet apps / TON Connect, and a residual **front-running / denial-of-service** risk for pending messages. It is
+quantum computers break Ed25519. You pay for that with ~70–100× higher fees (~0.04
+GRAM per operation), a stateful key that must be rotated every ~127 operations, no
+support in wallet apps / TON Connect, and a residual front-running / denial-of-service risk for pending messages. It is
 experimental and unaudited. Good for research, cold storage experiments and post-quantum
 readiness work; not a drop-in replacement for a user-facing wallet today.
 
@@ -34,16 +34,16 @@ readiness work; not a drop-in replacement for a user-facing wallet today.
 
 | | Impact |
 | --- | --- |
-| **Fees** | ~540–660k gas per request ≈ 0.038–0.046 GRAM (rotation ≈ 0.045–0.055 GRAM). Standard W5 ≈ 0.0004–0.0006 GRAM. |
-| **Stateful keys** | 128 signatures per tree; rotation every ~127 operations (the contract reserves the last leaf for it, so the wallet cannot freeze). Two devices signing concurrently, or re-signing after a *dropped* message, re-uses a one-time key. |
-| **Front-running** (MEDIUM) | Anyone who sees a pending message can get a forged copy in first, once: the wallet pays ~0.04 GRAM (≤ 0.067), the genuine message is invalidated and must be re-signed, one leaf is burned. No theft, no replay, no unbounded drain. Mitigation: relayer path, short `valid_until`. See [SECURITY.md](SECURITY.md#1-one-shot-griefing-of-pending-messages--medium-verified). |
-| **No ecosystem support** | No `get_public_key`, not a standard wallet interface: Tonkeeper/MyTonWallet/TON Connect/explorers will not treat it as a wallet; dApps cannot request signatures. |
-| **Custom crypto** | XMSS-like, not RFC 8391 (no ADRS tweaks): non-standard, ~239-bit classical / ~120-bit quantum security margin, no HSM / hardware-wallet support. |
-| **Unaudited** | No third-party audit; testnet only. |
-| **Big messages** | ~2.4 KB signature (28 cells) per request. |
-| **Restrictions** | One message per request; no mode 128 (cannot sweep the whole balance), no extensions/plugins. |
-| **Chain is not PQ** | TON validators and other contracts still use Ed25519. This protects only this wallet's authorization. |
-| **Proprietary recovery phrase** | 79 words, not BIP-39; only this project can restore it. |
+| Fees | ~540–660k gas per request ≈ 0.038–0.046 GRAM (rotation ≈ 0.045–0.055 GRAM). Standard W5 ≈ 0.0004–0.0006 GRAM. |
+| Stateful keys | 128 signatures per tree; rotation every ~127 operations (the contract reserves the last leaf for it, so the wallet cannot freeze). Two devices signing concurrently, or re-signing after a *dropped* message, re-uses a one-time key. |
+| Front-running (MEDIUM) | Anyone who sees a pending message can get a forged copy in first, once: the wallet pays ~0.04 GRAM (≤ 0.067), the genuine message is invalidated and must be re-signed, one leaf is burned. No theft, no replay, no unbounded drain. Mitigation: relayer path, short `valid_until`. See [SECURITY.md](SECURITY.md#1-one-shot-griefing-of-pending-messages-medium-verified). |
+| No ecosystem support | No `get_public_key`, not a standard wallet interface: Tonkeeper/MyTonWallet/TON Connect/explorers will not treat it as a wallet; dApps cannot request signatures. |
+| Custom crypto | XMSS-like, not RFC 8391 (no ADRS tweaks): non-standard, ~239-bit classical / ~120-bit quantum security margin, no HSM / hardware-wallet support. |
+| Unaudited | No third-party audit; testnet only. |
+| Big messages | ~2.4 KB signature (28 cells) per request. |
+| Restrictions | One message per request; no mode 128 (cannot sweep the whole balance), no extensions/plugins. |
+| Chain is not PQ | TON validators and other contracts still use Ed25519. This protects only this wallet's authorization. |
+| Proprietary recovery phrase | 79 words, not BIP-39; only this project can restore it. |
 
 ## Cost comparison (per operation)
 
@@ -60,7 +60,7 @@ Fees scale linearly with the network gas price (config param 21). Before the 202
 
 ## Recommend it when
 
-- The user explicitly wants **post-quantum protection** for long-term holdings and accepts
+- The user explicitly wants post-quantum protection for long-term holdings and accepts
   ~0.04 GRAM per operation (e.g. a vault moved a few times a year).
 - Research, education, hackathons, PQ-readiness prototypes, or as a base for a PQ wallet
   standard on TON.

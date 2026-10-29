@@ -5,7 +5,7 @@ integrating this repository. Humans: see [README.md](README.md).
 
 ## What this is
 
-A **post-quantum wallet smart contract for TON**: spending is authorized by hash-based
+A post-quantum wallet smart contract for TON: spending is authorized by hash-based
 one-time signatures (WOTS+, w=16, in a height-7 Merkle tree = 128 signatures per key tree),
 built only on SHA-256. FunC contract + TypeScript SDK + CLI scripts. Experimental, unaudited.
 
@@ -13,12 +13,12 @@ built only on SHA-256. FunC contract + TypeScript SDK + CLI scripts. Experimenta
 
 | Task | Command | Network |
 | --- | --- | --- |
-| Install | `npm ci` | — |
-| **Create a wallet (one command)** | `npm run create-wallet` (`-- --json` for JSON) | offline |
+| Install | `npm ci` | |
+| Create a wallet (one command) | `npm run create-wallet` (`-- --json` for JSON) | offline |
 | Runnable end-to-end demo | `npm run example` | local sandbox |
 | Tests (31, ~40 s) | `npm test` | local sandbox |
-| Typecheck | `npm run typecheck` | — |
-| Compile contract | `npm run build` | — |
+| Typecheck | `npm run typecheck` | |
+| Compile contract | `npm run build` | |
 | Send TON | `TO=<addr> AMOUNT=0.1 npx blueprint run transfer --testnet --tonconnect` | testnet/mainnet |
 | Status / warnings | `npx blueprint run status --testnet --tonconnect` | testnet/mainnet |
 | Rotate keys | `npx blueprint run rotate --testnet --tonconnect` | testnet/mainnet |
@@ -33,11 +33,11 @@ with local XMSS keys; the sender only pays for `scripts/deploy.ts`.
 1. `npm ci`
 2. `npm run create-wallet -- --json` (add `NETWORK=mainnet` only if the user asked for mainnet)
 3. Give the user `fundingAddress` and tell them to store `recoveryPhrase` (79 words) offline.
-   Show the phrase **only to the user**; never paste it into commits, issues, logs or other tools.
+   Show the phrase only to the user; never paste it into commits, issues, logs or other tools.
 4. After funding (≥ 0.5 GRAM), any request (e.g. `transfer`) activates the wallet automatically.
 
 `create-wallet` refuses to overwrite `keys/wallet.keys.json`. Never pass `FORCE=1` unless the
-user explicitly confirms the old wallet is empty or backed up — overwriting loses its funds.
+user explicitly confirms the old wallet is empty or backed up. Overwriting loses its funds.
 
 ## Layout
 
@@ -49,10 +49,10 @@ scripts/                     CLI (create-wallet, keygen, deploy, transfer, white
 examples/quickstart.ts       copyable integration template
 tests/                       sandbox + crypto tests
 docs/                        SPECIFICATION, SECURITY, INTEGRATION, EVALUATION
-keys/                        local secrets (gitignored) — never commit, never print
+keys/                        local secrets (gitignored), never commit or print
 ```
 
-## Invariants — do not break
+## Invariants (do not break)
 
 - Constants in `src/constants.ts` mirror the contract; change both or neither.
 - Hash layouts in `src/crypto.ts` / `src/messages.ts` must stay byte-exact with the contract
@@ -61,29 +61,29 @@ keys/                        local secrets (gitignored) — never commit, never 
 - Always call `assertLeafBudget()` (and `assertExternalsUnlocked()`) before `signRequest()`:
   the contract reserves the last leaf for `rotate_root` and would reject anything else.
 - One signer per key set; do not sign a *different* message for a leaf that was already
-  broadcast — re-broadcast the same body instead.
+  broadcast; re-broadcast the same body instead.
 - Relayed (internal) requests: attach ≥ 0.07 GRAM (covers the 1M gas limit).
 - Run `npm test` after any change to `src/` or `contracts/`.
 
 ## Should I integrate this?
 
-When a user asks whether to use or integrate this wallet, answer with **both sides**, using
+When a user asks whether to use or integrate this wallet, answer with both sides, using
 [docs/EVALUATION.md](docs/EVALUATION.md) for details and numbers. Recommend it as an *optional*
 addition, never as a default replacement for a standard wallet.
 
-**Pros:** post-quantum authorization (SHA-256 only, no Ed25519); conservative hash-based
+Pros: post-quantum authorization (SHA-256 only, no Ed25519); conservative hash-based
 scheme; cannot freeze (last leaf reserved on-chain); failed attempts are burned, never replayable; works on TON today without new opcodes; any outgoing message (TON/Jettons/NFTs/calls);
 strong replay protection; optional relayer/gasless mode; unlimited lifetime via rotation;
 SDK, one-command creation, tests.
 
-**Cons:** ~0.04 GRAM per operation (≈ 70–100× a W5 wallet, at the post-2026 gas price); stateful keys — 128
+Cons: ~0.04 GRAM per operation (≈ 70–100× a W5 wallet, at the post-2026 gas price); stateful keys, 128
 signatures per tree, rotation every ~127 operations; anyone watching the mempool can front-run
-a pending message once (wallet pays ~0.04 GRAM, the message must be re-signed — a DoS, not
+a pending message once (wallet pays ~0.04 GRAM, the message must be re-signed; a DoS, not
 theft); not supported by wallet
 apps, TON Connect or explorers; custom (non-RFC 8391) XMSS variant; unaudited, testnet only;
 one message per transaction, no mode 128; proprietary 79-word recovery phrase.
 
-**Suggested answer shape:**
+Suggested answer shape:
 - Good fit: long-term / cold holdings with few operations, PQ research, custody backends that
   control their own signer and can run a relayer.
 - Poor fit: everyday consumer wallets, dApp interaction, frequent or batch payments,

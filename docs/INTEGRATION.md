@@ -25,12 +25,12 @@ import { createWallet, keySetToJson } from './src';
 
 const created = createWallet({ code: Cell.fromHex(compiled.hex), walletId: 1 });
 created.address;          // where to send TON (use bounceable: false for the first top-up)
-created.recoveryPhrase;   // 79 words — show once, store offline
+created.recoveryPhrase;   // 79 words, show once and store offline
 keySetToJson(created.keys); // persist securely (contains secrets)
 created.wallet.init;      // StateInit; keep it until the wallet is active
 ```
 
-**Activation:** fund the address with a non-bounceable transfer, then send any signed request
+Activation: fund the address with a non-bounceable transfer, then send any signed request
 through a contract opened *with* `init` (`created.wallet`, or `new XmssWallet(address, init)`).
 `provider.external()` attaches StateInit automatically while the account is not active.
 Alternative: `scripts/deploy.ts` deploys from another wallet with an internal message.
@@ -99,7 +99,7 @@ await send({
 1. Whitelist the relayer: `{ type: 'wl_add', address: relayer }` (or pass `whitelist` at creation).
 2. The user signs with `authMode: AUTH.INTERNAL` and hands `signed.body` to the relayer.
 3. The relayer sends it: `wallet.sendInternalSigned(via, body, toNano('0.07'))`.
-   Attach **≥ 0.07 GRAM**: no `accept_message` in this path, so gas is capped by
+   Attach ≥ 0.07 GRAM: no `accept_message` in this path, so gas is capped by
    `value / gas_price`; 0.07 GRAM covers the full 1M gas limit at 66.67 nanoGRAM/gas.
    Too little value fails with exit −14 (out of gas). The remainder stays in the user wallet.
 
@@ -127,7 +127,7 @@ CLI: `PHRASE_FILE=phrase.txt npx blueprint run recover --mainnet --tonconnect`.
 - Transactions on the wallet with exit 135 and no outgoing message → a pending message was
   front-run; re-sign it (the SDK reads the new seqno/leaf) or switch to the relayer path.
 - Storage v2 wallets (first published contract) are still readable/signable by the SDK, but
-  have the unfixed issues described in SECURITY.md — migrate funds.
+  have the unfixed issues described in SECURITY.md, so migrate funds.
 - Error codes: [SPECIFICATION.md §6](SPECIFICATION.md#6-exit-codes).
 
 ## SDK reference (exports of `src/index.ts`)

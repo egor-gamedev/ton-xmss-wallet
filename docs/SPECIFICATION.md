@@ -14,7 +14,7 @@ only storage and processing order differ (§2, §4). The SDK reads both storage 
 ## 1. Cryptographic scheme
 
 A single-tree XMSS-style construction built from TVM `cell_hash` (SHA-256 of the cell
-representation). It is **inspired by RFC 8391 but not compatible with it** (see §1.4).
+representation). It is inspired by RFC 8391 but not compatible with it (see §1.4).
 
 | Parameter | Value |
 | --- | --- |
@@ -117,7 +117,7 @@ uint256 blinded_preimage    must be present in the blinded dict; consumed on suc
 | `0x03` wl_remove | `^[MsgAddressInt]` | removes address from whitelist |
 
 `out_msg` is any serialized `MessageRelaxed` (internal), so TON transfers, Jetton/NFT
-transfers and arbitrary contract calls are possible — one per request.
+transfers and arbitrary contract calls are possible, one per request.
 
 ### 3.3 Proof
 
@@ -134,8 +134,8 @@ bits left, from its single ref. Leftover bits/refs after the last word are rejec
 
 ### recv_external (op `sign`)
 
-Before `accept_message` — free for the wallet, measured ≈ 7 000 of the 10 000 gas credit
-(`tests/XmssWallet.spec.ts` asserts acceptance with an 8 000 credit):
+Before `accept_message` (free for the wallet). Uses about 7 000 of the 10 000 gas credit.
+`tests/XmssWallet.spec.ts` checks that it is still accepted with an 8 000 credit.
 1. parse body and storage
 2. `now ≥ ext_lock_until`
 3. `seqno`, `wallet_id`, `now < valid_until ≤ now + 86400`, `policy`, `req_type ≤ 3`
@@ -144,7 +144,7 @@ Before `accept_message` — free for the wallet, measured ≈ 7 000 of the 10 00
 5. proof header: version, `leaf_index == next_leaf`, `pub_seed` match
 6. `commit(blinded_preimage)` present in blinded dict
 
-`accept_message`, then **burn and `commit()`** before anything expensive:
+`accept_message`, then burn and `commit()` before anything expensive:
 7. if `next_leaf + 1 < limit`: save `seqno + 1`, `next_leaf + 1`, blinded key removed,
    `blinded_remaining − 1`. Otherwise (last leaf, rotation): nothing is burned, but
    `ext_lock_until = valid_until` is saved.
@@ -211,4 +211,4 @@ There is no `get_public_key` and no TON wallet-standard interface.
 - Blinded preimage `i`: `SHA-256("BLND" ‖ blinded_master_seed ‖ i as u64 little-endian)`;
   128 commitments are stored at deployment / rotation.
 - Default policy: `cell_hash` of the UTF-8 string `{"role":"user","walletId":<id>}`.
-- Recovery phrase: see `src/recovery.ts` (79 BIP-39 English words, custom format, **not BIP-39**).
+- Recovery phrase: see `src/recovery.ts` (79 BIP-39 English words, custom format, not BIP-39).

@@ -1,6 +1,6 @@
 # Archive
 
-Earlier iterations of the XMSS wallet, kept for history. **Not maintained, not tested, do not deploy.**
+Earlier iterations of the XMSS wallet, kept for history. Not maintained, not tested, do not deploy.
 The current contract is `../xmss_wallet.fc`.
 
 | File | Notes |

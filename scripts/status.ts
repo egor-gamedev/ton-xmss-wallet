@@ -41,7 +41,7 @@ export async function run(provider: NetworkProvider) {
         ui.write(`local keys match   ${match ? 'yes' : 'NO (wrong key file or rotation pending)'}`);
     }
     const remaining = s.limit - s.nextLeaf;
-    if (remaining <= 0) ui.write('!! EXHAUSTED: no leaves left, the wallet can never sign again.');
+    if (remaining <= 0) ui.write('Warning: no leaves left, the wallet can never sign again.');
     else if (remaining <= 8)
-        ui.write(`!! Only ${remaining} leaves left. Run "npx blueprint run rotate" now.`);
+        ui.write(`Warning: only ${remaining} leaves left. Run "npx blueprint run rotate" now.`);
 }

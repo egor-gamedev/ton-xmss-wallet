@@ -16,7 +16,7 @@
 - Tests and the example run with the current mainnet fee params (`tests/network-config.ts`).
 - The 0.05 GRAM relayer minimum now covers verification gas; recommended value 0.07 GRAM.
 
-## 0.2.0 — contract fix (storage v3, new code hash `4f6ce7be…38ac`)
+## 0.2.0: contract fix (storage v3, new code hash `4f6ce7be…38ac`)
 
 - Fee-drain fix: wallet_id, valid_until, policy, request type and the leaf / blinded-key
   budget are checked before `accept_message` (≈ 7k of the 10k free gas). Expired messages can

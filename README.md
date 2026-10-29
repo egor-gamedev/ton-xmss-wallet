@@ -1,15 +1,18 @@
-# TON XMSS Wallet — post-quantum wallet for TON
+# TON XMSS Wallet
+
+Post-quantum wallet for TON.
 
 [Русская версия](README.ru.md)
 
-A TON wallet smart contract whose spending authorization uses **hash-based one-time
-signatures** (WOTS+ in an XMSS-style Merkle tree) instead of Ed25519. It relies only on
+A TON wallet smart contract whose spending authorization uses hash-based one-time
+signatures (WOTS+ in an XMSS-style Merkle tree) instead of Ed25519. It relies only on
 SHA-256, so it stays secure against quantum computers that would break every standard
 TON wallet. Includes a TypeScript SDK, one-command wallet creation, CLI scripts and tests.
 
-> ⚠️ **Experimental and unaudited.** Tested in `@ton/sandbox` and on testnet. Fees are
-> ~0.04 GRAM per operation, and pending messages can be front-run (denial of service, not theft) — read
-> [docs/EVALUATION.md](docs/EVALUATION.md) and [docs/SECURITY.md](docs/SECURITY.md) first.
+> Experimental and unaudited. Tested in `@ton/sandbox` and on testnet. Fees are
+> ~0.04 GRAM per operation, and pending messages can be front-run (denial of service,
+> not theft). Read [docs/EVALUATION.md](docs/EVALUATION.md) and [docs/SECURITY.md](docs/SECURITY.md)
+> first.
 
 ## Quick start
 
@@ -26,7 +29,7 @@ TO=<address> AMOUNT=0.1 npx blueprint run transfer --testnet --tonconnect
 npx blueprint run status --testnet --tonconnect
 ```
 
-The first request activates the wallet automatically — no separate deploy step.
+The first request activates the wallet automatically, there is no separate deploy step.
 
 ## How it works
 
@@ -38,19 +41,19 @@ request ─► digest = H(wallet address, auth mode, request type, blinded key, 
         ─► contract recomputes the root, consumes the leaf and a blinded key, executes
 ```
 
-- **Requests:** `transfer` (any one internal message: TON, Jettons, NFTs, calls),
+- Requests: `transfer` (any one internal message: TON, Jettons, NFTs, calls),
   `rotate_root` (switch to a new tree), `wl_add` / `wl_remove` (relayer whitelist).
-- **Blinded keys:** 128 hash commitments on-chain; each request reveals one preimage. They let
+- Blinded keys: 128 hash commitments on-chain; each request reveals one preimage. They let
   the contract reject random external messages for free before paying for verification.
-- **Two entry points:** external messages (wallet pays gas) or internal messages from a
-  whitelisted relayer (relayer pays gas — gasless flow).
-- **Rotation:** every tree gives 128 signatures; rotate before the last one.
+- Two entry points: external messages (wallet pays gas) or internal messages from a
+  whitelisted relayer (relayer pays gas, i.e. a gasless flow).
+- Rotation: every tree gives 128 signatures; rotate before the last one.
 
 Details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
-## Pros and cons at a glance
+## Pros and cons
 
-| ✅ | ❌ |
+| Pros | Cons |
 | --- | --- |
 | Post-quantum: SHA-256 only, no Ed25519 | ~0.04 GRAM per operation (≈ 70–100× a W5 wallet) |
 | Works on TON today, ~600k gas (< 1M limit) | Stateful: 128 signatures per tree, rotate every ~127 operations |
@@ -86,10 +89,10 @@ a transfer cost 0.0386 GRAM.
 
 ## Documentation
 
-- [Integration guide](docs/INTEGRATION.md) — SDK usage, relayer flow, rotation, recovery
-- [Specification](docs/SPECIFICATION.md) — hashes, storage, message formats, exit codes
-- [Security](docs/SECURITY.md) — threat model, known issues, operational checklist
-- [Evaluation](docs/EVALUATION.md) — should you use it?
+- [Integration guide](docs/INTEGRATION.md): SDK usage, relayer flow, rotation, recovery
+- [Specification](docs/SPECIFICATION.md): hashes, storage, message formats, exit codes
+- [Security](docs/SECURITY.md): threat model, known issues, operational checklist
+- [Evaluation](docs/EVALUATION.md): should you use it?
 
 ## Development
 

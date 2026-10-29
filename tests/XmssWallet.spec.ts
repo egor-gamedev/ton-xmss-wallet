@@ -1,11 +1,19 @@
 import { Blockchain, SandboxContract, SendMessageResult, TreasuryContract } from '@ton/sandbox';
-import { beginCell, Cell, fromNano, internal, toNano } from '@ton/core';
+import { beginCell, Cell, fromNano, internal, storeMessageRelaxed, toNano } from '@ton/core';
 import { compile } from '@ton/blueprint';
-import { useMainnetFees } from './network-config';
+import { setGasCredit, useMainnetFees } from './network-config';
 import '@ton/test-utils';
 import {
     AUTH,
+    authPath,
     blindedCommitments,
+    buildProof,
+    commitBlindedKey,
+    deriveBlindedPreimage,
+    hashRequest,
+    REQ,
+    RotateRootRequest,
+    wotsSign,
     buildBody,
     buildPayload,
     buildTree,
@@ -105,6 +113,27 @@ describe('XmssWallet', () => {
         message: internal({ to: recipient.address, value: toNano(amount), bounce: false })
     });
 
+    const rotateTo = (next: Signer): RotateRootRequest => ({
+        type: 'rotate_root',
+        newRoot: treeRoot(next.tree),
+        newPublicSeed: next.keys.publicSeed,
+        newPolicy: next.keys.policy,
+        newLimit: 128,
+        newBlindedCommitments: blindedCommitments(next.keys.blindedMasterSeed, 128)
+    });
+
+    /** Keeps the genuine proof header (seqno, leaf, pub_seed) but garbles the signature. */
+    const forge = (body: Cell, payload: Cell) => {
+        const proof = body.refs[0];
+        const forgedProof = beginCell()
+            .storeBits(proof.beginParse().loadBits(8 + 64 + 256))
+            .storeUint(0, 256)
+            .storeUint(0, 256)
+            .storeRef(proof.refs[0])
+            .endCell();
+        return buildBody(AUTH.EXTERNAL, forgedProof, payload);
+    };
+
     beforeEach(async () => {
         blockchain = await Blockchain.create();
         useMainnetFees(blockchain);
@@ -152,10 +181,16 @@ describe('XmssWallet', () => {
 
         const cp = computePhase(r);
         console.log(
-            `external transfer: gasUsed=${cp.gasUsed} computeFee=${fromNano(cp.gasFees)} TON ` +
-                `totalFees=${fromNano(r.transactions[0].totalFees.coins)} TON ` +
+            `external transfer: gasUsed=${cp.gasUsed} computeFee=${fromNano(cp.gasFees)} GRAM ` +
+                `totalFees=${fromNano(r.transactions[0].totalFees.coins)} GRAM ` +
                 `bodyCells=${countCells(signed.body)}`
         );
+    });
+
+    it('pre-accept checks fit the 10k gas credit with a safety margin (accepted at 8000)', async () => {
+        setGasCredit(blockchain, 8000); // measured usage ≈ 7000
+        const r = await wallet.sendExternalSigned((await sign(transfer('0.1'))).body);
+        expect(r.transactions).toHaveTransaction({ on: wallet.address, success: true });
     });
 
     it('sends many transfers in a row (leaves and blinded keys advance together)', async () => {
@@ -198,62 +233,118 @@ describe('XmssWallet', () => {
         });
     });
 
-    describe('KNOWN ISSUE: failures after accept_message are paid by the wallet', () => {
-        it('a forged proof that passes the cheap header checks is charged and replayable', async () => {
+    describe('griefing protection (storage v3)', () => {
+        it('a forged proof is charged once, burns the attempt and cannot be replayed', async () => {
             // An attacker who saw a pending message knows a valid (seqno, leaf, pub_seed, blinded preimage).
             const signed = await sign(transfer());
-            const proof = signed.body.refs[0];
-            const forgedProof = beginCell()
-                .storeBits(proof.beginParse().loadBits(8 + 64 + 256)) // genuine header
-                .storeUint(0, 256)
-                .storeUint(0, 256)
-                .storeRef(proof.refs[0])
-                .endCell();
-            const forged = buildBody(AUTH.EXTERNAL, forgedProof, signed.payload);
+            const forged = forge(signed.body, signed.payload);
 
             const balance0 = (await blockchain.getContract(wallet.address)).balance;
             const r1 = await wallet.sendExternalSigned(forged);
             expect(r1.transactions).toHaveTransaction({
                 on: wallet.address,
-                success: false,
-                exitCode: ERR.INVALID_SIGNATURE
-            });
-            const r2 = await wallet.sendExternalSigned(forged); // state unchanged -> replayable
-            expect(r2.transactions).toHaveTransaction({
-                on: wallet.address,
-                success: false,
-                exitCode: ERR.INVALID_SIGNATURE
+                exitCode: ERR.INVALID_SIGNATURE, // attempt committed (burned) before the throw
+                outMessagesCount: 0
             });
             const spent = balance0 - (await blockchain.getContract(wallet.address)).balance;
-            console.log(`griefing: 2 forged externals cost the wallet ${fromNano(spent)} TON`);
-            expect(spent).toBeGreaterThan(0n);
+            console.log(`griefing: one forged external cost the wallet ${fromNano(spent)} GRAM`);
 
-            // The genuine message still works afterwards.
-            const ok = await wallet.sendExternalSigned(signed.body);
+            // The attempt was burned: seqno, leaf and blinded key moved on although it failed.
+            expect(await wallet.getSeqno()).toBe(1);
+            expect(await wallet.getNextLeaf()).toBe(1);
+            expect(await wallet.getBlindedKeysRemaining()).toBe(127);
+
+            // Neither the forgery nor the leaked genuine message can be accepted again (free rejection).
+            await expect(wallet.sendExternalSigned(forged)).rejects.toThrow();
+            await expect(wallet.sendExternalSigned(signed.body)).rejects.toThrow();
+
+            // The owner simply signs a new request with the next leaf — no WOTS+ key reuse.
+            const ok = await wallet.sendExternalSigned((await sign(transfer())).body);
             expect(ok.transactions).toHaveTransaction({ on: wallet.address, success: true });
+            expect(await wallet.getNextLeaf()).toBe(2);
         });
 
-        it('an expired message is accepted, fails with exit 136, and can be replayed by anyone', async () => {
+        it('an expired message is rejected before accept (free, nothing changes)', async () => {
             const signed = await sign(transfer(), { validUntil: blockchain.now! + 60 });
             blockchain.now = blockchain.now! + 120;
-            const r1 = await wallet.sendExternalSigned(signed.body);
-            expect(r1.transactions).toHaveTransaction({
-                on: wallet.address,
-                success: false,
-                exitCode: ERR.EXPIRED
-            });
-            const r2 = await wallet.sendExternalSigned(signed.body);
-            expect(r2.transactions).toHaveTransaction({
-                on: wallet.address,
-                success: false,
-                exitCode: ERR.EXPIRED
-            });
-            expect(await wallet.getNextLeaf()).toBe(0); // the same WOTS+ leaf must be signed again => key reuse
+            await expect(wallet.sendExternalSigned(signed.body)).rejects.toThrow();
+            expect(await wallet.getSeqno()).toBe(0);
+            expect(await wallet.getNextLeaf()).toBe(0);
         });
-    });
 
-    describe('post-accept validation', () => {
-        it('rejects send mode 128 (carry all balance)', async () => {
+        it('valid_until more than 24 h ahead is rejected before accept', async () => {
+            const header = await sign(transfer());
+            const far = buildPayload(
+                {
+                    walletId: 1,
+                    validUntil: blockchain.now! + 2 * 86400,
+                    seqno: 0,
+                    policy: signer.keys.policy,
+                    blindedPreimage: header.blindedPreimage
+                },
+                transfer()
+            );
+            const body = buildBody(AUTH.EXTERNAL, header.body.refs[0], far);
+            await expect(wallet.sendExternalSigned(body)).rejects.toThrow();
+        });
+
+        it('a wrong wallet_id is rejected before accept', async () => {
+            const s: Signer = { keys: { ...signer.keys, walletId: 2 }, tree: signer.tree };
+            await expect(
+                wallet.sendExternalSigned((await sign(transfer(), { s })).body)
+            ).rejects.toThrow();
+            expect(await wallet.getSeqno()).toBe(0);
+        });
+
+        it('a wrong policy is rejected before accept', async () => {
+            const s: Signer = { keys: { ...signer.keys, policy: 42n }, tree: signer.tree };
+            await expect(
+                wallet.sendExternalSigned((await sign(transfer(), { s })).body)
+            ).rejects.toThrow();
+            expect(await wallet.getSeqno()).toBe(0);
+        });
+
+        it('any post-accept failure (here: a forbidden send mode) burns the leaf', async () => {
+            const s = await wallet.getStorage();
+            const blindedPreimage = deriveBlindedPreimage(signer.keys.blindedMasterSeed, 0);
+            const payload = beginCell()
+                .storeUint(1, 32)
+                .storeUint(blockchain.now! + 600, 32)
+                .storeUint(s.seqno, 32)
+                .storeUint(signer.keys.policy, 256)
+                .storeUint(REQ.TRANSFER, 8)
+                .storeUint(blindedPreimage, 256)
+                .storeUint(128, 8) // mode 128 — rejected by validate_send_mode
+                .storeRef(
+                    beginCell()
+                        .store(
+                            storeMessageRelaxed(
+                                internal({ to: recipient.address, value: 0n, bounce: false })
+                            )
+                        )
+                        .endCell()
+                )
+                .endCell();
+            const msgHash = hashRequest(
+                wallet.address,
+                payload,
+                REQ.TRANSFER,
+                AUTH.EXTERNAL,
+                commitBlindedKey(blindedPreimage)
+            );
+            const sig = wotsSign(signer.keys.secretSeed, signer.keys.publicSeed, 0, msgHash);
+            const proof = buildProof(0, signer.keys.publicSeed, sig, authPath(signer.tree, 0));
+            const r = await wallet.sendExternalSigned(buildBody(AUTH.EXTERNAL, proof, payload));
+            expect(r.transactions).toHaveTransaction({
+                on: wallet.address,
+                exitCode: ERR.BAD_MODE, // attempt committed (burned) before the throw
+                outMessagesCount: 0
+            });
+            expect(await wallet.getNextLeaf()).toBe(1);
+            expect(await wallet.getSeqno()).toBe(1);
+        });
+
+        it('SDK refuses send mode 128', () => {
             const header = {
                 walletId: 1,
                 validUntil: blockchain.now! + 600,
@@ -262,26 +353,6 @@ describe('XmssWallet', () => {
                 blindedPreimage: 0n
             };
             expect(() => buildPayload(header, transfer('1', 128))).toThrow(/not allowed/);
-        });
-
-        it('rejects a wrong wallet_id with exit 134', async () => {
-            const s: Signer = { keys: { ...signer.keys, walletId: 2 }, tree: signer.tree };
-            const r = await wallet.sendExternalSigned((await sign(transfer(), { s })).body);
-            expect(r.transactions).toHaveTransaction({
-                on: wallet.address,
-                success: false,
-                exitCode: ERR.INVALID_WALLET_ID
-            });
-        });
-
-        it('rejects a wrong policy with exit 148', async () => {
-            const s: Signer = { keys: { ...signer.keys, policy: 42n }, tree: signer.tree };
-            const r = await wallet.sendExternalSigned((await sign(transfer(), { s })).body);
-            expect(r.transactions).toHaveTransaction({
-                on: wallet.address,
-                success: false,
-                exitCode: ERR.POLICY_MISMATCH
-            });
         });
     });
 
@@ -395,7 +466,7 @@ describe('XmssWallet', () => {
             console.log(
                 `rotate_root: gasUsed=${computePhase(r).gasUsed} totalFees=${fromNano(
                     r.transactions[0].totalFees.coins
-                )} TON`
+                )} GRAM`
             );
             expect(await wallet.getRoot()).toBe(treeRoot(next.tree));
             expect(await wallet.getNextLeaf()).toBe(0);
@@ -412,29 +483,69 @@ describe('XmssWallet', () => {
             expect(ok.transactions).toHaveTransaction({ on: wallet.address, success: true });
         });
 
-        it('KNOWN ISSUE: once every leaf is spent the wallet is frozen forever', async () => {
+        it('the last leaf is reserved for rotate_root, so the wallet cannot freeze', async () => {
             await deploy(signer, 2);
             await wallet.sendExternalSigned((await sign(transfer('0.1'))).body);
-            await wallet.sendExternalSigned((await sign(transfer('0.1'))).body);
-            expect(await wallet.getLeavesRemaining()).toBe(0);
+            expect(await wallet.getLeavesRemaining()).toBe(1);
+
+            // A transfer on the last leaf is refused for free.
+            await expect(
+                wallet.sendExternalSigned((await sign(transfer('0.1'))).body)
+            ).rejects.toThrow();
+            expect(await wallet.getSeqno()).toBe(1);
+
             const next = makeSigner();
-            const r = await wallet.sendExternalSigned(
-                (
-                    await sign({
-                        type: 'rotate_root',
-                        newRoot: treeRoot(next.tree),
-                        newPublicSeed: next.keys.publicSeed,
-                        newPolicy: next.keys.policy,
-                        newLimit: 128,
-                        newBlindedCommitments: blindedCommitments(next.keys.blindedMasterSeed, 128)
-                    })
-                ).body
-            );
+            const r = await wallet.sendExternalSigned((await sign(rotateTo(next))).body);
+            expect(r.transactions).toHaveTransaction({ on: wallet.address, success: true });
+            expect(await wallet.getRoot()).toBe(treeRoot(next.tree));
+            expect(await wallet.getLeavesRemaining()).toBe(128);
+        });
+
+        it('a forged rotation on the last leaf does not burn it: externals lock until the message expires', async () => {
+            await deploy(signer, 2);
+            await wallet.sendExternalSigned((await sign(transfer('0.1'))).body);
+            const next = makeSigner();
+            const validUntil = blockchain.now! + 300;
+            const signed = await sign(rotateTo(next), { validUntil });
+
+            const r = await wallet.sendExternalSigned(forge(signed.body, signed.payload));
             expect(r.transactions).toHaveTransaction({
                 on: wallet.address,
-                success: false,
-                exitCode: ERR.WALLET_EXHAUSTED
+                exitCode: ERR.INVALID_SIGNATURE, // attempt committed (burned) before the throw
+                outMessagesCount: 0
             });
+            expect(await wallet.getLeavesRemaining()).toBe(1); // not burned
+            expect(await wallet.getExternalLockUntil()).toBe(validUntil);
+
+            // Locked: neither the forgery nor the leaked genuine message is accepted (free).
+            await expect(wallet.sendExternalSigned(signed.body)).rejects.toThrow();
+
+            // The relayer path is not locked: the owner can still rotate right away.
+            const relayed = await sign(rotateTo(next), { authMode: AUTH.INTERNAL });
+            const rr = await wallet.sendInternalSigned(
+                relayer.getSender(),
+                relayed.body,
+                toNano('0.1')
+            );
+            expect(rr.transactions).toHaveTransaction({ to: wallet.address, success: true });
+            expect(await wallet.getRoot()).toBe(treeRoot(next.tree));
+            expect(await wallet.getExternalLockUntil()).toBe(0);
+        });
+
+        it('rotation rejects a tree with fewer than 2 leaves (SDK)', () => {
+            const next = makeSigner();
+            expect(() =>
+                buildPayload(
+                    {
+                        walletId: 1,
+                        validUntil: blockchain.now! + 600,
+                        seqno: 0,
+                        policy: 0n,
+                        blindedPreimage: 0n
+                    },
+                    { ...rotateTo(next), newLimit: 1 }
+                )
+            ).toThrow(/2\.\.128/);
         });
     });
 
@@ -488,8 +599,8 @@ describe('XmssWallet', () => {
         const r = await twin.sendExternalSigned(signed.body);
         expect(r.transactions).toHaveTransaction({
             on: twin.address,
-            success: false,
-            exitCode: ERR.INVALID_SIGNATURE
+            exitCode: ERR.INVALID_SIGNATURE, // attempt committed (burned) before the throw
+            outMessagesCount: 0
         });
     });
 

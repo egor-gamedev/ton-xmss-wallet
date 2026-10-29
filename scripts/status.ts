@@ -21,6 +21,18 @@ export async function run(provider: NetworkProvider) {
     );
     ui.write(`blinded keys left  ${s.blindedRemaining}`);
     ui.write(`whitelist entries  ${s.whitelist.size}`);
+    ui.write(
+        `storage version    ${s.version}${
+            s.version < 3 ? ' (old contract: see docs/SECURITY.md)' : ''
+        }`
+    );
+    if (s.extLockUntil > Math.floor(Date.now() / 1000)) {
+        ui.write(
+            `externals locked   until ${new Date(
+                s.extLockUntil * 1000
+            ).toISOString()} (relayer path still works)`
+        );
+    }
     ui.write(`root               ${toHex256(s.root)}`);
 
     if (fs.existsSync(KEYS_FILE)) {

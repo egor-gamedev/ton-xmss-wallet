@@ -121,10 +121,13 @@ CLI: `PHRASE_FILE=phrase.txt npx blueprint run recover --mainnet --tonconnect`.
 
 ## 6. Monitoring checklist
 
-- `get_leaves_remaining` ≤ 8 → rotate now; = 1 → only `rotate_root` is allowed.
+- `get_leaves_remaining` ≤ 8 → rotate now; = 1 → only `rotate_root` is allowed (enforced on-chain, exit 162).
+- `get_external_lock_until` > now → externals are locked after a forged last-leaf rotation; use the relayer.
 - `get_blinded_keys_remaining` must stay > 0 (rotation refills it).
-- Failed transactions on the wallet with exit 135/136 → someone is griefing; lower the balance
-  or switch to relayer mode.
+- Transactions on the wallet with exit 135 and no outgoing message → a pending message was
+  front-run; re-sign it (the SDK reads the new seqno/leaf) or switch to the relayer path.
+- Storage v2 wallets (first published contract) are still readable/signable by the SDK, but
+  have the unfixed issues described in SECURITY.md — migrate funds.
 - Error codes: [SPECIFICATION.md §6](SPECIFICATION.md#6-exit-codes).
 
 ## SDK reference (exports of `src/index.ts`)

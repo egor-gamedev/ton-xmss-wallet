@@ -97,6 +97,11 @@ export class XmssWallet implements Contract {
         return (await provider.get('get_blinded_keys_remaining', [])).stack.readNumber();
     }
 
+    /** Unix time until which externals are rejected after a failed last-leaf rotation (0 = none). */
+    async getExternalLockUntil(provider: ContractProvider): Promise<number> {
+        return (await provider.get('get_external_lock_until', [])).stack.readNumber();
+    }
+
     async getIsWhitelisted(provider: ContractProvider, addr: Address): Promise<boolean> {
         const res = await provider.get('is_whitelisted', [
             { type: 'slice', cell: beginCell().storeAddress(addr).endCell() }

@@ -1,6 +1,5 @@
 // automatically generated from `contracts/xmss_wallet.fc` incl:`contracts/imports/stdlib.fc` 
 PROGRAM{
-  DECLPROC _require
   DECLPROC commit_blinded_key
   DECLPROC chain_step
   DECLPROC chain_iter
@@ -37,14 +36,7 @@ PROGRAM{
   115516 DECLMETHOD get_tree_height
   85425 DECLMETHOD is_whitelisted
   69221 DECLMETHOD get_blinded_keys_remaining
-  _require PROCINLINE:<{
-    SWAP
-    IFNOT:<{
-      THROWANY
-    }>ELSE<{
-      DROP
-    }>
-  }>
+  120036 DECLMETHOD get_external_lock_until
   commit_blinded_key PROCINLINE:<{
     1112297028 PUSHINT
     NEWC
@@ -127,8 +119,7 @@ PROGRAM{
       DUP
       SREFS
       1 EQINT
-      154 PUSHINT
-      _require INLINECALLDICT
+      154 THROWIFNOT
       LDREF
       DROP
       CTOS
@@ -137,8 +128,7 @@ PROGRAM{
     SBITS
     8 PUSHPOW2
     GEQ
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     256 LDU
   }>
   verify_wots_plus PROCINLINE:<{
@@ -273,17 +263,14 @@ PROGRAM{
     s2 PUSH
     SBITS
     0 EQINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     s0 s2 XCHG
     SREFS
     0 EQINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     SWAP
     EQUAL
-    135 PUSHINT
-    _require INLINECALLDICT
+    135 THROWIFNOT
     -1 PUSHINT
   }>
   verify_xmss PROCINLINE:<{
@@ -293,29 +280,24 @@ PROGRAM{
     SBITS
     328 PUSHINT
     GEQ
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     DUP
     SREFS
     2 LESSINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     8 LDU
     SWAP
     1 EQINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     64 LDU
     s1 s4 PUXC
     EQUAL
-    151 PUSHINT
-    _require INLINECALLDICT
+    151 THROWIFNOT
     s0 s3 XCHG
     256 LDU
     s1 s5 XCPU
     EQUAL
-    135 PUSHINT
-    _require INLINECALLDICT
+    135 THROWIFNOT
     s3 s7 XCHG
     s0 s6 XCHG
     hash_message INLINECALLDICT
@@ -327,18 +309,12 @@ PROGRAM{
   validate_blinded_key PROCINLINE:<{
     DUP
     ISNULL
-    IF:<{
-      160 THROW
-    }>
-    SWAP
-    commit_blinded_key INLINECALLDICT
-    SWAP
+    160 THROWIF
     8 PUSHPOW2
     DICTUGET
     NULLSWAPIFNOT
     NIP
-    160 PUSHINT
-    _require INLINECALLDICT
+    160 THROWIFNOT
   }>
   consume_blinded_key PROCINLINE:<{
     commit_blinded_key INLINECALLDICT
@@ -379,26 +355,24 @@ PROGRAM{
     DUP
     SREFS
     2 EQINT
-    156 PUSHINT
-    _require INLINECALLDICT
+    156 THROWIFNOT
     8 LDU
     SWAP
-    2 EQINT
-    156 PUSHINT
-    _require INLINECALLDICT
+    3 EQINT
+    156 THROWIFNOT
     32 LDU
     32 LDU
     256 LDU
     256 LDU
     256 LDU
+    32 LDU
     32 LDU
     32 LDU
     32 LDU
     DUP
     SBITS
     0 EQINT
-    156 PUSHINT
-    _require INLINECALLDICT
+    156 THROWIFNOT
     LDREF
     LDREF
     DROP
@@ -412,21 +386,17 @@ PROGRAM{
     LDDICT
     s0 s3 XCHG
     SEMPTY
-    156 PUSHINT
-    _require INLINECALLDICT
+    156 THROWIFNOT
     s0 s2 XCHG
     SEMPTY
-    156 PUSHINT
-    _require INLINECALLDICT
-    s3 s4 PUSH2
+    156 THROWIFNOT
+    s4 s5 PUSH2
     LEQ
-    156 PUSHINT
-    _require INLINECALLDICT
-    s4 PUSH
+    156 THROWIFNOT
+    s5 PUSH
     7 PUSHPOW2
     LEQ
-    156 PUSHINT
-    _require INLINECALLDICT
+    156 THROWIFNOT
     SWAP
   }>
   save_storage PROCINLINE:<{
@@ -437,19 +407,20 @@ PROGRAM{
     NEWC
     STDICT
     ENDC
-    2 PUSHINT
+    3 PUSHINT
     NEWC
     8 STU
-    s1 s10 XCHG
+    s1 s11 XCHG
     32 STU
-    s1 s8 XCHG
+    s1 s9 XCHG
     32 STU
-    s1 s6 XCHG
+    s1 s7 XCHG
     256 STU
-    s1 s4 XCHG
+    s1 s5 XCHG
     256 STU
-    s1 s2 XCHG
+    s1 s3 XCHG
     256 STU
+    32 STU
     32 STU
     32 STU
     32 STU
@@ -520,70 +491,79 @@ PROGRAM{
     SWAP
     66 EQINT
     OR
-    157 PUSHINT
-    _require INLINECALLDICT
+    157 THROWIFNOT
   }>
   check_common PROCINLINE:<{
-    s4 s4 XCHG2
+    s8 s4 XCHG2
     EQUAL
-    133 PUSHINT
-    _require INLINECALLDICT
-    s1 s4 XCHG
+    133 THROWIFNOT
+    s8 s3 XCHG2
     EQUAL
-    134 PUSHINT
-    _require INLINECALLDICT
-    OVER
+    134 THROWIFNOT
+    s5 PUSH
     NOW
     GREATER
-    136 PUSHINT
-    _require INLINECALLDICT
+    136 THROWIFNOT
     NOW
     86400 PUSHINT
     ADD
-    s1 s2 XCHG
+    s1 s6 XCHG
     LEQ
-    136 PUSHINT
-    _require INLINECALLDICT
+    136 THROWIFNOT
+    s2 s5 XCHG2
     EQUAL
-    148 PUSHINT
-    _require INLINECALLDICT
+    148 THROWIFNOT
+    DUP
+    4 LESSINT
+    138 THROWIFNOT
+    s1 s3 PUSH2
+    LESS
+    153 THROWIFNOT
+    s2 PUSH
+    0 GTINT
+    160 THROWIFNOT
+    1 EQINT
+    IFNOT:<{
+      INC
+      ROT
+      LESS
+      162 THROWIFNOT
+      1 GTINT
+      162 THROWIFNOT
+    }>ELSE<{
+      3 BLKDROP
+    }>
   }>
   parse_body PROCINLINE:<{
     OVER
     SBITS
     31 GTINT
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     SWAP
     32 LDU
     s0 s2 XCHG
     EQUAL
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     DUP
     SREFS
     1 GTINT
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     LDREF
     LDREF
     DUP
     SBITS
     0 EQINT
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     SREFS
     0 EQINT
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     DUP
     CTOS
     DUP
     SBITS
     616 PUSHINT
     GEQ
-    138 PUSHINT
-    _require INLINECALLDICT
+    138 THROWIFNOT
     32 LDU
     32 LDU
     32 LDU
@@ -593,47 +573,31 @@ PROGRAM{
     6 -ROLL
   }>
   handle_request PROC:<{
-    s3 17 s() XCHG
-    s2 16 s() XCHG
-    s15 s14 s10 XC2PU
-    s12 s10 PUSH2
-    check_common INLINECALLDICT
-    s1 s2 PUSH2
-    LESS
-    153 PUSHINT
-    _require INLINECALLDICT
-    DUP
-    0 GTINT
-    160 PUSHINT
-    _require INLINECALLDICT
-    s12 s8 XCHG2
+    s2 s12 XCHG2
     consume_blinded_key INLINECALLDICT
-    s0 s7 XCHG
+    s0 s3 XCHG
     DEC
     s3 s14 XCHG
     s2 s15 XCHG
-    s14 PUSH
-    s0 s2 XCHG
-    16 s() PUSH
-    s13 s2 s(-1) PUXC2
-    s11 s13 s12 PUXC2
+    s7 PUSH
+    s7 s2 s(-1) PUXC2
+    s6 PUSH
+    s15 s2 s14 PUXC2
     verify_xmss INLINECALLDICT
     -1 EQINT
-    135 PUSHINT
-    _require INLINECALLDICT
-    s0 s2 XCHG
+    135 THROWIFNOT
+    s0 s6 XCHG
     INC
-    s0 s7 XCHG
+    s0 s6 XCHG
     INC
-    s4 PUSH
+    s8 PUSH
     0 EQINT
     IF:<{
-      s4 POP
+      s8 POP
       s8 PUSH
       SBITS
       7 GTINT
-      138 PUSHINT
-      _require INLINECALLDICT
+      138 THROWIFNOT
       s0 s8 XCHG
       8 LDU
       OVER
@@ -641,39 +605,37 @@ PROGRAM{
       DUP
       SREFS
       1 EQINT
-      138 PUSHINT
-      _require INLINECALLDICT
+      138 THROWIFNOT
       LDREF
       DUP
       SBITS
       0 EQINT
-      138 PUSHINT
-      _require INLINECALLDICT
+      138 THROWIFNOT
       SREFS
       0 EQINT
-      138 PUSHINT
-      _require INLINECALLDICT
+      138 THROWIFNOT
       SWAP
       SENDRAWMSG
-      s5 s9 XCHG
-      s0 s7 XCHG
-      s0 s8 XCHG
-      s3 s6 s6 XCHG3
+      s4 s9 XCHG
+      s3 s8 XCHG
+      s7 s1 s5 XCHG3
+      s0 s6 s4 XCHG3
+      s1 s3 XCHG
+      0 PUSHINT
+      s0 s2 XCHG
       save_storage INLINECALLDICT
       COMMIT
     }>ELSE<{
-      s4 PUSH
+      s8 PUSH
       1 EQINT
       IF:<{
-        s1 s6 XCHG
-        6 BLKDROP
-        s4 POP
-        s4 POP
+        5 BLKDROP
+        2 2 BLKDROP2
+        s3 POP
         OVER
         SREFS
         1 EQINT
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         SWAP
         LDREF
         SWAP
@@ -682,8 +644,7 @@ PROGRAM{
         SBITS
         832 PUSHINT
         GEQ
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         256 LDU
         256 LDU
         32 LDU
@@ -692,108 +653,108 @@ PROGRAM{
         DUP
         SREFS
         1 EQINT
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         LDREF
         SBITS
         0 EQINT
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         s6 PUSH
         SBITS
         0 EQINT
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         s0 s6 XCHG
         SREFS
         0 EQINT
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         s0 s5 XCHG
         CTOS
         LDDICT
         SEMPTY
-        138 PUSHINT
-        _require INLINECALLDICT
+        138 THROWIFNOT
         DUP
         8 PUSHPOW2
         udict_count INLINECALLDICT
         s6 s(-1) PUXC
         EQUAL
-        160 PUSHINT
-        _require INLINECALLDICT
-        s5 PUSH
-        0 GTINT
-        160 PUSHINT
-        _require INLINECALLDICT
+        160 THROWIFNOT
         s2 PUSH
-        0 GTINT
-        153 PUSHINT
-        _require INLINECALLDICT
+        1 GTINT
+        153 THROWIFNOT
         s2 PUSH
         7 PUSHPOW2
         LEQ
-        153 PUSHINT
-        _require INLINECALLDICT
-        s1 s6 XCHG
-        s4 s5 XCHG
-        s3 s4 XCHG
-        s2 s3 XCHG
+        153 THROWIFNOT
+        s5 s2 PUSH2
+        GEQ
+        160 THROWIFNOT
         0 PUSHINT
-        3 -ROLL
+        DUP
+        s8 s10 XCHG
+        s3 s8 XCHG
+        s6 s7 XCHG
+        s5 s6 XCHG
+        s4 s2 XCHG2
+        s1 s5 XCHG
+        s1 s3 XCHG
         save_storage INLINECALLDICT
         COMMIT
       }>ELSE<{
-        s4 PUSH
+        s8 PUSH
         2 EQINT
         IF:<{
-          s4 POP
+          s8 POP
           s8 PUSH
           SBITS
           0 EQINT
-          138 PUSHINT
-          _require INLINECALLDICT
+          138 THROWIFNOT
           s8 PUSH
           SREFS
           1 EQINT
-          138 PUSHINT
-          _require INLINECALLDICT
+          138 THROWIFNOT
           s0 s8 XCHG
           LDREF
           DROP
           CTOS
-          s1 s7 XCHG
+          s0 s10 XCHG
+          0 PUSHINT
+          s0 s11 XCHG
           wl_set INLINECALLDICT
-          s5 s9 XCHG
-          s7 s8 XCHG
-          s6 s7 XCHG
-          s3 s0 s0 XCHG3
+          s5 s10 XCHG
+          s4 s9 XCHG
+          s3 s8 XCHG
+          s7 s6 s0 XCHG3
+          s3 s5 XCHG
+          s4 s0 s3 XCHG3
+          s0 s2 XCHG
           save_storage INLINECALLDICT
           COMMIT
         }>ELSE<{
-          s0 s4 XCHG
+          s0 s8 XCHG
           3 EQINT
           IF:<{
             s8 PUSH
             SBITS
             0 EQINT
-            138 PUSHINT
-            _require INLINECALLDICT
+            138 THROWIFNOT
             s8 PUSH
             SREFS
             1 EQINT
-            138 PUSHINT
-            _require INLINECALLDICT
+            138 THROWIFNOT
             s0 s8 XCHG
             LDREF
             DROP
             CTOS
-            s1 s7 XCHG
+            s0 s10 XCHG
+            0 PUSHINT
+            s0 s11 XCHG
             wl_del INLINECALLDICT
-            s5 s9 XCHG
-            s7 s8 XCHG
-            s6 s7 XCHG
-            s3 s0 s0 XCHG3
+            s5 s10 XCHG
+            s4 s9 XCHG
+            s3 s8 XCHG
+            s7 s6 s0 XCHG3
+            s3 s5 XCHG
+            s4 s0 s3 XCHG3
+            s0 s2 XCHG
             save_storage INLINECALLDICT
             COMMIT
           }>ELSE<{
@@ -821,44 +782,90 @@ PROGRAM{
     1936287598 PUSHINT
     parse_body INLINECALLDICT
     load_storage INLINECALLDICT
-    s13 s9 PUSH2
-    EQUAL
-    133 PUSHINT
-    _require INLINECALLDICT
-    18 s() PUSH
+    NOW
+    s0 s3 XCHG2
+    GEQ
+    161 THROWIFNOT
+    s2 s15 XCHG
+    s14 s13 s12 PUXC2
+    s12 s9 s10 PUSH3
+    s11 s8 s7 PUSH3
+    22 s() PUSH
+    check_common INLINECALLDICT
+    s15 PUSH
     CTOS
     DUP
     SBITS
     328 PUSHINT
     GEQ
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     DUP
     SREFS
     2 LESSINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     8 LDU
     SWAP
     1 EQINT
-    154 PUSHINT
-    _require INLINECALLDICT
+    154 THROWIFNOT
     64 LDU
-    s1 s5 XCPU
+    s1 s2 XCPU
     EQUAL
-    151 PUSHINT
-    _require INLINECALLDICT
+    151 THROWIFNOT
     256 LDU
     DROP
-    s6 PUSH
+    s3 PUSH
     EQUAL
-    135 PUSHINT
-    _require INLINECALLDICT
-    s10 s0 PUSH2
-    validate_blinded_key INLINECALLDICT
-    s10 PUSH
+    135 THROWIFNOT
+    s7 PUSH
     commit_blinded_key INLINECALLDICT
+    s0 s10 PUSH2
+    validate_blinded_key INLINECALLDICT
     ACCEPT
+    OVER
+    INC
+    s3 PUSH
+    LESS
+    IF:<{
+      s12 POP
+      s6 PUSH
+      INC
+      OVER
+      INC
+      s14 PUSH
+      DEC
+      0 PUSHINT
+      s13 s11 PUSH2
+      consume_blinded_key INLINECALLDICT
+      s10 PUSH
+      s4 s10 XCPU
+      s4 s10 XCPU
+      s4 s10 XCPU
+      s4 s10 XCPU
+      4 -ROLL
+      20 s() PUSH
+      SWAP
+      save_storage INLINECALLDICT
+    }>ELSE<{
+      s7 s6 s(-2) PU2XC
+      s7 s6 s(-2) PU2XC
+      s7 s6 s(-2) PU2XC
+      s7 s(-1) PUXC
+      20 s() PUSH
+      SWAP
+      s0 20 s() XCHG
+      19 s() PUSH
+      19 s() PUSH
+      save_storage INLINECALLDICT
+    }>
+    COMMIT
+    s8 s12 XCHG
+    s7 s11 XCHG
+    s6 s10 XCHG
+    s5 s9 XCHG
+    s4 s8 XCHG
+    s3 s7 XCHG
+    s6 s1 s4 XCHG3
+    s5 s3 XCHG2
     1 PUSHINT
     SWAP
     handle_request CALLDICT
@@ -891,82 +898,81 @@ PROGRAM{
     s0 s2 XCHG
     50000000 PUSHINT
     GEQ
-    159 PUSHINT
-    _require INLINECALLDICT
+    159 THROWIFNOT
     load_storage INLINECALLDICT
-    OVER
+    s2 POP
+    DUP
     ISNULL
     IF:<{
       158 THROW
     }>
-    s1 s11 PUXC
+    s0 s11 PUXC
     wl_contains INLINECALLDICT
-    158 PUSHINT
-    _require INLINECALLDICT
+    158 THROWIFNOT
     s0 s9 XCHG
     1936289396 PUSHINT
     parse_body INLINECALLDICT
-    DUP
-    19 s() PUSH
-    validate_blinded_key INLINECALLDICT
+    4 2 BLKSWAP
+    s5 s15 PUSH2
+    18 s() PUSH
+    17 s() PUSH
+    s15 s14 s13 PUSH3
+    check_common INLINECALLDICT
     DUP
     commit_blinded_key INLINECALLDICT
-    s9 19 s() XCHG
-    s8 18 s() XCHG
-    s7 17 s() XCHG
-    s6 16 s() XCHG
+    s0 s14 PUSH2
+    validate_blinded_key INLINECALLDICT
     s5 s15 XCHG
     s4 s14 XCHG
     s3 s13 XCHG
     s12 s11 s0 XCHG3
-    s7 s10 XCHG
-    s6 s9 XCHG
-    s5 s8 XCHG
-    s4 s7 XCHG
-    s3 s6 XCHG
-    s5 s4 s0 XCHG3
-    s1 s3 XCHG
+    s3 s10 XCHG
+    s9 s8 s0 XCHG3
+    s3 s7 XCHG
+    s6 s5 s0 XCHG3
+    s3 s4 XCHG
+    s1 s3 s0 XCHG3
     2 PUSHINT
     SWAP
     handle_request CALLDICT
   }>
   seqno PROC:<{
     load_storage INLINECALLDICT
-    9 BLKDROP
+    10 BLKDROP
   }>
   get_wallet_id PROC:<{
     load_storage INLINECALLDICT
-    s8 s9 XCHG
-    9 BLKDROP
+    s9 s10 XCHG
+    10 BLKDROP
   }>
   get_policy_hash PROC:<{
     load_storage INLINECALLDICT
-    s7 s9 XCHG
-    9 BLKDROP
+    s8 s10 XCHG
+    10 BLKDROP
   }>
   get_root PROC:<{
     load_storage INLINECALLDICT
-    s6 s9 XCHG
-    9 BLKDROP
+    s7 s10 XCHG
+    10 BLKDROP
   }>
   get_public_seed PROC:<{
     load_storage INLINECALLDICT
-    s5 s9 XCHG
-    9 BLKDROP
+    s6 s10 XCHG
+    10 BLKDROP
   }>
   get_leaf_limit PROC:<{
     load_storage INLINECALLDICT
-    s4 s9 XCHG
-    9 BLKDROP
+    s5 s10 XCHG
+    10 BLKDROP
   }>
   get_next_leaf PROC:<{
     load_storage INLINECALLDICT
-    s3 s9 XCHG
-    9 BLKDROP
+    s4 s10 XCHG
+    10 BLKDROP
   }>
   get_leaves_remaining PROC:<{
     load_storage INLINECALLDICT
-    3 BLKDROP
+    4 BLKDROP
     5 2 BLKDROP2
     SUB
   }>
@@ -975,8 +981,8 @@ PROGRAM{
   }>
   is_whitelisted PROC:<{
     load_storage INLINECALLDICT
-    s1 s9 XCHG
-    9 BLKDROP
+    s1 s10 XCHG
+    10 BLKDROP
     DUP
     ISNULL
     IFJMP:<{
@@ -988,7 +994,12 @@ PROGRAM{
   }>
   get_blinded_keys_remaining PROC:<{
     load_storage INLINECALLDICT
-    s2 s9 XCHG
-    9 BLKDROP
+    s3 s10 XCHG
+    10 BLKDROP
+  }>
+  get_external_lock_until PROC:<{
+    load_storage INLINECALLDICT
+    s2 s10 XCHG
+    10 BLKDROP
   }>
 }END>c

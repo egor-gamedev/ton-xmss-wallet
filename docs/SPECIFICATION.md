@@ -1,11 +1,15 @@
 # Specification
 
-Byte-level description of `contracts/xmss_wallet.fc` (storage version 2, proof version 1).
+Byte-level description of `contracts/xmss_wallet.fc` (storage version 3, proof version 1).
 The TypeScript SDK in `src/` implements exactly this; `tests/crypto.spec.ts` checks the SDK
 hashes against `@ton/core` cell hashes.
 
-Compiled code hash: `ff6a94b4e2174005bbf87215a9f7d9b69b284b4bc6cca30327ee9f5f1887f5d7`
+Compiled code hash: `4f6ce7bea9b50089fad7736b0fe5d10f54b136ebcc412254e376e2db825338ac`
 (FunC 0.4.4 via `@ton-community/func-js-bin@0.4.5-tvmbeta.3`).
+
+The first deployed version (storage v2, code hash `ff6a94b4…f5d7`) is kept in
+`contracts/archive/xmss_wallet_v4_storage_v2.fc`. Message and proof formats are identical;
+only storage and processing order differ (§2, §4). The SDK reads both storage versions.
 
 ## 1. Cryptographic scheme
 
@@ -62,10 +66,10 @@ Every hash is `cell_hash` of one ordinary cell with no refs. For a byte-aligned 
 Consequence: not interoperable with standard XMSS libraries/HSMs, and multi-target attacks
 apply (see [SECURITY.md](SECURITY.md#cryptography)).
 
-## 2. Storage (version 2)
+## 2. Storage (version 3)
 
 ```
-uint8   version = 2
+uint8   version = 3
 uint32  seqno
 uint32  wallet_id
 uint256 policy              opaque value every request must repeat
@@ -74,11 +78,14 @@ uint256 pub_seed
 uint32  limit               usable leaves, 1..128
 uint32  next_leaf           index the next signature must use
 uint32  blinded_remaining   counter, kept in sync by the contract
+uint32  ext_lock_until      externals rejected while now < ext_lock_until (0 = unlocked)
 ^Cell   [ HashmapE 256 ]    whitelist       key = wl_key(addr), value ignored
 ^Cell   [ HashmapE 256 ]    blinded keys    key = commit(preimage), value ignored
 ```
 
 Invariants checked on every load: `next_leaf ≤ limit ≤ 128`, no extra bits, exactly 2 refs.
+Invariant kept by the contract: the last leaf (and last blinded key) is only ever spent on
+`rotate_root`, so a v3 wallet can always rotate.
 
 ## 3. Messages
 
@@ -105,7 +112,7 @@ uint256 blinded_preimage    must be present in the blinded dict; consumed on suc
 | `req_type` | Tail | Effect (each consumes 1 leaf + 1 blinded key, seqno += 1) |
 | --- | --- | --- |
 | `0x00` transfer | `mode:uint8 ^out_msg` | `send_raw_message(out_msg, mode)`, mode ∈ {0,1,2,64,65,66} |
-| `0x01` rotate_root | `^[ new_root:u256 new_pub_seed:u256 new_limit:u32 new_policy:u256 new_blinded_count:u32 ^[HashmapE 256] ]` | replaces root / seed / policy / limit / blinded dict; `next_leaf = 0`. `new_blinded_count` must equal the dict size, `1 ≤ new_limit ≤ 128` |
+| `0x01` rotate_root | `^[ new_root:u256 new_pub_seed:u256 new_limit:u32 new_policy:u256 new_blinded_count:u32 ^[HashmapE 256] ]` | replaces root / seed / policy / limit / blinded dict; `next_leaf = 0`, lock cleared. `new_blinded_count` must equal the dict size, `2 ≤ new_limit ≤ 128`, `new_blinded_count ≥ new_limit` |
 | `0x02` wl_add | `^[MsgAddressInt]` | adds address to whitelist |
 | `0x03` wl_remove | `^[MsgAddressInt]` | removes address from whitelist |
 
@@ -127,23 +134,36 @@ bits left, from its single ref. Leftover bits/refs after the last word are rejec
 
 ### recv_external (op `sign`)
 
-Before `accept_message` (must fit the 10 000 gas credit):
+Before `accept_message` — free for the wallet, measured ≈ 7 000 of the 10 000 gas credit
+(`tests/XmssWallet.spec.ts` asserts acceptance with an 8 000 credit):
 1. parse body and storage
-2. `seqno_in == seqno`
-3. proof header: version, `leaf_index == next_leaf`, `pub_seed` match
-4. `commit(blinded_preimage)` present in blinded dict
+2. `now ≥ ext_lock_until`
+3. `seqno`, `wallet_id`, `now < valid_until ≤ now + 86400`, `policy`, `req_type ≤ 3`
+4. budget: `next_leaf < limit`, `blinded_remaining > 0`; unless `req_type` is rotate_root also
+   `next_leaf + 1 < limit` and `blinded_remaining > 1` (the last leaf is reserved, exit 162)
+5. proof header: version, `leaf_index == next_leaf`, `pub_seed` match
+6. `commit(blinded_preimage)` present in blinded dict
 
-After `accept_message` (paid from the wallet balance) — `handle_request`:
-5. `wallet_id`, `valid_until`, `policy`; `next_leaf < limit`; `blinded_remaining > 0`
-6. full WOTS+ + Merkle verification against `root`
-7. execute request, save storage, `commit()`
+`accept_message`, then **burn and `commit()`** before anything expensive:
+7. if `next_leaf + 1 < limit`: save `seqno + 1`, `next_leaf + 1`, blinded key removed,
+   `blinded_remaining − 1`. Otherwise (last leaf, rotation): nothing is burned, but
+   `ext_lock_until = valid_until` is saved.
+
+`handle_request` (paid from the wallet balance):
+8. full WOTS+ + Merkle verification against `root`
+9. execute request, save final storage (lock cleared), `commit()`
+
+Any exception or out-of-gas in steps 8–9 keeps the state committed in step 7: the message
+cannot be replayed and its leaf is retired. Because state was committed, explorers show such a
+transaction as successful compute phase with a non-zero exit code and no outgoing messages.
 
 ### recv_internal
 
 - Bounced messages and bodies without op `sint` are accepted silently (top-ups).
 - `msg_value ≥ 0.05 GRAM` (gas is capped at `msg_value / gas_price`; attach ≥ 0.07 GRAM to cover 1M gas),
-  sender must be whitelisted, blinded key present, then `handle_request` with `auth_mode = 2`.
-  No `accept_message`: gas is bounded by `msg_value / gas_price`.
+  sender must be whitelisted, the same checks as steps 3–4 and 6 above, then `handle_request`
+  with `auth_mode = 2`. No `accept_message` and no burn: a failure bounces and changes nothing.
+  Not affected by `ext_lock_until`.
 
 ## 5. Get methods
 
@@ -160,6 +180,7 @@ After `accept_message` (paid from the wallet balance) — `handle_request`:
 | `get_tree_height` | 7 |
 | `get_blinded_keys_remaining` | int |
 | `is_whitelisted(slice addr)` | −1 / 0 |
+| `get_external_lock_until` | unix time, 0 if not locked |
 
 There is no `get_public_key` and no TON wallet-standard interface.
 
@@ -168,19 +189,21 @@ There is no `get_public_key` and no TON wallet-standard interface.
 | Code | Name | Raised |
 | --- | --- | --- |
 | 133 | invalid_seqno | pre-accept |
-| 134 | invalid_wallet_id | post-accept |
+| 134 | invalid_wallet_id | pre-accept |
 | 135 | invalid_signature | pre-accept (pub_seed) / post-accept (WOTS+, Merkle) |
-| 136 | expired | post-accept |
-| 138 | invalid_op | parsing |
-| 148 | policy_mismatch | post-accept |
+| 136 | expired | pre-accept |
+| 138 | invalid_op | parsing / unknown `req_type` (pre-accept) |
+| 148 | policy_mismatch | pre-accept |
 | 151 | invalid_leaf_index | pre-accept |
-| 153 | wallet_exhausted | post-accept (`next_leaf == limit`, or bad `new_limit`) |
+| 153 | wallet_exhausted | pre-accept `next_leaf == limit`; post-accept bad `new_limit` |
 | 154 | invalid_proof_format | proof parsing |
 | 156 | bad_storage | storage parsing |
 | 157 | bad_mode | send mode not allowed |
 | 158 | not_whitelisted | internal from unknown sender |
 | 159 | insufficient_value | internal with < 0.05 GRAM |
 | 160 | invalid_blinded_key | unknown/consumed blinded key, or bad rotate count |
+| 161 | externals_locked | pre-accept, while `now < ext_lock_until` |
+| 162 | leaf_reserved | pre-accept, non-rotation request on the last leaf / blinded key |
 
 ## 7. Off-chain key derivation (SDK convention)
 

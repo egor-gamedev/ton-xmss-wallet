@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { Address, Cell } from '@ton/core';
 import { NetworkProvider } from '@ton/blueprint';
 import {
+    assertExternalsUnlocked,
     assertLeafBudget,
     buildTree,
     keySetFromJson,
@@ -83,7 +84,8 @@ export async function signAndSend(
         throw new Error('local keys do not match the on-chain root');
     if (storage.walletId !== keys.walletId) throw new Error('walletId mismatch');
     if (storage.policy !== keys.policy) throw new Error('policy mismatch');
-    assertLeafBudget(storage.nextLeaf, storage.limit, request);
+    assertExternalsUnlocked(storage.extLockUntil);
+    assertLeafBudget(storage.nextLeaf, storage.limit, request, storage.blindedRemaining);
 
     const blindedIndex = await wallet.getUnusedBlindedIndex(keys.blindedMasterSeed);
     if (blindedIndex < 0) throw new Error('no unused blinded keys left — rotate keys');
@@ -117,7 +119,8 @@ export async function signAndSend(
         }
     }
     ui.write(
-        'Not confirmed within 2 minutes. Do NOT sign a different message yet: re-broadcast the same ' +
-            'body or wait — signing new data with the same leaf weakens WOTS+ (see docs/SECURITY.md).'
+        'Not confirmed within 2 minutes. Run "status": if seqno is unchanged, the message was never ' +
+            'accepted — re-broadcast the same body while it is valid. If seqno moved but nothing was ' +
+            'sent, the attempt was rejected and burned; simply sign a new request.'
     );
 }

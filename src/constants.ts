@@ -18,7 +18,7 @@ export const MAX_VALID_UNTIL_DELTA = 86400;
 export const MIN_INTERNAL_MSG_VALUE = 50_000_000n;
 
 export const PROOF_VERSION = 0x01;
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 
 export const OP = {
     SIGNED_EXTERNAL: 0x7369676e, // "sign"
@@ -68,5 +68,7 @@ export const ERR = {
     BAD_MODE: 157,
     NOT_WHITELISTED: 158,
     INSUFFICIENT_VALUE: 159,
-    INVALID_BLINDED_KEY: 160
+    INVALID_BLINDED_KEY: 160,
+    EXTERNALS_LOCKED: 161,
+    LEAF_RESERVED: 162
 } as const;

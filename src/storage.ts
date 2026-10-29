@@ -1,6 +1,6 @@
-// Contract storage (version 2) layout — see docs/SPECIFICATION.md.
+// Contract storage (version 3) layout — see docs/SPECIFICATION.md.
 //
-//   uint8   version = 2
+//   uint8   version = 3
 //   uint32  seqno
 //   uint32  wallet_id
 //   uint256 policy
@@ -9,6 +9,7 @@
 //   uint32  limit              (<= 128)
 //   uint32  next_leaf
 //   uint32  blinded_remaining
+//   uint32  ext_lock_until     (v3 only; externals rejected while now < this)
 //   ^[ HashmapE 256 ]  whitelist      key = H(WLIT || wc:int8 || addr_hash:uint256)
 //   ^[ HashmapE 256 ]  blinded keys   key = H(BLND || preimage)
 
@@ -55,6 +56,10 @@ export type XmssWalletStorage = {
     limit: number;
     nextLeaf: number;
     blindedRemaining: number;
+    /** Unix time until which external messages are rejected (0 = not locked). Always 0 for v2. */
+    extLockUntil: number;
+    /** 3 = current contract; 2 = original deployment (contracts/archive/xmss_wallet_v4_storage_v2.fc). */
+    version: number;
     whitelist: KeyDict;
     blindedKeys: KeyDict;
 };
@@ -65,7 +70,7 @@ export function storeKeyDictBox(d: KeyDict): Cell {
         .endCell();
 }
 
-export function buildStorage(s: XmssWalletStorage): Cell {
+export function buildStorage(s: Omit<XmssWalletStorage, 'version'>): Cell {
     return beginCell()
         .storeUint(STORAGE_VERSION, 8)
         .storeUint(s.seqno, 32)
@@ -76,6 +81,7 @@ export function buildStorage(s: XmssWalletStorage): Cell {
         .storeUint(s.limit, 32)
         .storeUint(s.nextLeaf, 32)
         .storeUint(s.blindedRemaining, 32)
+        .storeUint(s.extLockUntil, 32)
         .storeRef(storeKeyDictBox(s.whitelist))
         .storeRef(storeKeyDictBox(s.blindedKeys))
         .endCell();
@@ -90,14 +96,16 @@ export type InitialStorageParams = {
     blindedCommitments: bigint[];
     /** Addresses allowed to relay signed internal requests (gasless / relayer flow). */
     whitelist?: Address[];
-    /** Number of usable leaves, 1..128. Default 128. */
+    /** Number of usable leaves, 2..128 (the last one is reserved for rotation). Default 128. */
     limit?: number;
 };
 
 export function buildInitialStorage(p: InitialStorageParams): Cell {
     const limit = p.limit ?? TREE_MAX_LEAVES;
-    if (limit < 1 || limit > TREE_MAX_LEAVES) throw new Error('limit must be 1..128');
-    if (p.blindedCommitments.length === 0) throw new Error('at least one blinded key is required');
+    if (limit < 2 || limit > TREE_MAX_LEAVES) throw new Error('limit must be 2..128');
+    if (new Set(p.blindedCommitments).size < limit) {
+        throw new Error('need at least `limit` distinct blinded keys');
+    }
     return buildStorage({
         seqno: 0,
         walletId: p.walletId,
@@ -106,7 +114,8 @@ export function buildInitialStorage(p: InitialStorageParams): Cell {
         publicSeed: p.publicSeed,
         limit,
         nextLeaf: 0,
-        blindedRemaining: p.blindedCommitments.length,
+        blindedRemaining: new Set(p.blindedCommitments).size,
+        extLockUntil: 0,
         whitelist: keyDictFrom((p.whitelist ?? []).map(whitelistKey)),
         blindedKeys: keyDictFrom(p.blindedCommitments)
     });
@@ -122,8 +131,11 @@ function loadKeyDictBox(c: Cell): KeyDict {
 export function parseStorage(data: Cell): XmssWalletStorage {
     const s = data.beginParse();
     const version = s.loadUint(8);
-    if (version !== STORAGE_VERSION) throw new Error(`unsupported storage version ${version}`);
+    if (version !== STORAGE_VERSION && version !== 2) {
+        throw new Error(`unsupported storage version ${version}`);
+    }
     const out: XmssWalletStorage = {
+        version,
         seqno: s.loadUint(32),
         walletId: s.loadUint(32),
         policy: s.loadUintBig(256),
@@ -132,6 +144,7 @@ export function parseStorage(data: Cell): XmssWalletStorage {
         limit: s.loadUint(32),
         nextLeaf: s.loadUint(32),
         blindedRemaining: s.loadUint(32),
+        extLockUntil: version >= 3 ? s.loadUint(32) : 0,
         whitelist: loadKeyDictBox(s.loadRef()),
         blindedKeys: loadKeyDictBox(s.loadRef())
     };

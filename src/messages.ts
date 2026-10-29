@@ -42,7 +42,7 @@ export type RotateRootRequest = {
     newRoot: bigint;
     newPublicSeed: bigint;
     newPolicy: bigint;
-    /** Usable leaves in the new tree, 1..128. */
+    /** Usable leaves in the new tree, 2..128 (the last is reserved for the next rotation). */
     newLimit: number;
     /** Commitments H(BLND || preimage) of the new blinded keys (non-empty). */
     newBlindedCommitments: bigint[];
@@ -99,10 +99,12 @@ export function buildPayload(h: PayloadHeader, r: WalletRequest): Cell {
             return b.storeUint(r.mode, 8).storeRef(msg).endCell();
         }
         case 'rotate_root': {
-            if (r.newLimit < 1 || r.newLimit > TREE_MAX_LEAVES)
-                throw new Error('newLimit must be 1..128');
-            if (r.newBlindedCommitments.length === 0)
-                throw new Error('newBlindedCommitments is empty');
+            if (r.newLimit < 2 || r.newLimit > TREE_MAX_LEAVES) {
+                throw new Error('newLimit must be 2..128');
+            }
+            if (new Set(r.newBlindedCommitments).size < r.newLimit) {
+                throw new Error('need at least newLimit distinct blinded commitments');
+            }
             const treeData = beginCell()
                 .storeUint(r.newRoot, 256)
                 .storeUint(r.newPublicSeed, 256)
@@ -185,12 +187,30 @@ export function buildBody(authMode: AuthMode, proof: Cell, payload: Cell): Cell 
  * A wallet with next_leaf == limit can never sign again (funds frozen), so
  * the last leaf must be reserved for rotation. Call before signRequest().
  */
-export function assertLeafBudget(nextLeaf: number, limit: number, request: WalletRequest): void {
-    const remaining = limit - nextLeaf;
-    if (remaining <= 0)
+export function assertLeafBudget(
+    nextLeaf: number,
+    limit: number,
+    request: WalletRequest,
+    blindedRemaining = Infinity
+): void {
+    const remaining = Math.min(limit - nextLeaf, blindedRemaining);
+    if (remaining <= 0) {
         throw new Error('wallet is exhausted: no leaves left, funds cannot be moved');
+    }
     if (remaining === 1 && request.type !== 'rotate_root') {
         throw new Error('only one leaf left: it is reserved for rotate_root — rotate keys first');
+    }
+}
+
+/**
+ * Throws if the wallet currently rejects external messages (after a failed attempt on the
+ * last leaf). Use the relayer path or wait until `extLockUntil`.
+ */
+export function assertExternalsUnlocked(extLockUntil: number, now = Math.floor(Date.now() / 1000)) {
+    if (now < extLockUntil) {
+        throw new Error(
+            `externals are locked until ${new Date(extLockUntil * 1000).toISOString()}`
+        );
     }
 }
 

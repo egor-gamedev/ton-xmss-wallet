@@ -1,6 +1,6 @@
 # TON XMSS Wallet
 
-> Post-quantum wallet smart contract for the TON blockchain. Spending is authorized by hash-based one-time signatures (WOTS+, w=16, Merkle tree of height 7 = 128 signatures per key tree) built only on SHA-256. FunC contract + TypeScript SDK + CLI. Experimental, unaudited. ~0.04 GRAM (formerly TON) per operation at 2026 gas prices. Stateful keys: rotate before the last leaf.
+> Post-quantum wallet smart contract for the TON blockchain. Spending is authorized by hash-based one-time signatures (WOTS+, w=16, Merkle tree of height 7 = 128 signatures per key tree) built only on SHA-256. FunC contract + TypeScript SDK + CLI. Experimental, unaudited. ~0.04 GRAM (formerly TON) per operation at 2026 gas prices. Stateful keys: rotate every ~127 operations (the last leaf is reserved on-chain).
 
 One-command wallet: `npm ci && npm run create-wallet -- --json`. Runnable demo: `npm run example`. Tests: `npm test`.
 

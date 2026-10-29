@@ -8,7 +8,7 @@ SHA-256, so it stays secure against quantum computers that would break every sta
 TON wallet. Includes a TypeScript SDK, one-command wallet creation, CLI scripts and tests.
 
 > ⚠️ **Experimental and unaudited.** Tested in `@ton/sandbox` and on testnet. Fees are
-> ~0.04 GRAM per operation, and there are known availability issues — read
+> ~0.04 GRAM per operation, and pending messages can be front-run (denial of service, not theft) — read
 > [docs/EVALUATION.md](docs/EVALUATION.md) and [docs/SECURITY.md](docs/SECURITY.md) first.
 
 ## Quick start
@@ -53,8 +53,8 @@ Details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 | ✅ | ❌ |
 | --- | --- |
 | Post-quantum: SHA-256 only, no Ed25519 | ~0.04 GRAM per operation (≈ 70–100× a W5 wallet) |
-| Works on TON today, ~600k gas (< 1M limit) | Stateful: 128 signatures per tree, must rotate in time |
-| Any outgoing message, replay-protected | Fee-griefing issue (forged / expired messages cost the wallet) |
+| Works on TON today, ~600k gas (< 1M limit) | Stateful: 128 signatures per tree, rotate every ~127 operations |
+| Any outgoing message, replay-protected; cannot freeze (last leaf reserved on-chain) | A watcher can front-run a pending message once (~0.04 GRAM, the message must be re-signed) |
 | Relayer / gasless mode, key rotation | No wallet-app / TON Connect support, custom XMSS variant |
 | SDK, 1-command creation, recovery phrase, tests | Unaudited; one message per tx; no mode 128 |
 
@@ -69,7 +69,7 @@ a transfer cost 0.0386 GRAM.
 | Operation | Gas | Total fee |
 | --- | --- | --- |
 | Transfer (external) | 540k–660k | 0.038–0.046 GRAM |
-| rotate_root | ~655–665k | ~0.05 GRAM |
+| rotate_root | 600k–720k | 0.045–0.055 GRAM |
 | Forged message accepted by griefer | ~600k | ~0.04 GRAM (paid by wallet) |
 
 ## Project layout

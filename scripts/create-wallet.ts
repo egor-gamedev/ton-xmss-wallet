@@ -16,7 +16,7 @@ import { Address, Cell } from '@ton/core';
 import { createWallet, toHex256, treeRoot } from '../src';
 import { DEPLOY_FILE, KEYS_FILE, RECOVERY_FILE, saveKeys, writeSecretJson } from './lib/common';
 
-const EXPECTED_CODE_HASH = 'ff6a94b4e2174005bbf87215a9f7d9b69b284b4bc6cca30327ee9f5f1887f5d7';
+const EXPECTED_CODE_HASH = '4f6ce7bea9b50089fad7736b0fe5d10f54b136ebcc412254e376e2db825338ac';
 
 function main() {
     const json = process.argv.includes('--json');

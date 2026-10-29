@@ -42,7 +42,7 @@ user explicitly confirms the old wallet is empty or backed up — overwriting lo
 ## Layout
 
 ```
-contracts/xmss_wallet.fc     the contract (code hash ff6a94b4…f5d7)
+contracts/xmss_wallet.fc     the contract (storage v3, code hash 4f6ce7be…38ac)
 contracts/archive/           earlier iterations, not maintained
 src/                         SDK: crypto, keys, storage, messages, recovery, create, XmssWallet wrapper
 scripts/                     CLI (create-wallet, keygen, deploy, transfer, whitelist, rotate, status, recover)
@@ -58,8 +58,8 @@ keys/                        local secrets (gitignored) — never commit, never 
 - Hash layouts in `src/crypto.ts` / `src/messages.ts` must stay byte-exact with the contract
   (`tests/crypto.spec.ts`). Changing the contract changes the code hash and every new address.
 - Always read `seqno` / `next_leaf` from chain (`getStorage()`); never keep a local leaf counter.
-- Always call `assertLeafBudget()` before `signRequest()`: the last leaf is reserved for
-  `rotate_root`, otherwise the wallet is frozen forever.
+- Always call `assertLeafBudget()` (and `assertExternalsUnlocked()`) before `signRequest()`:
+  the contract reserves the last leaf for `rotate_root` and would reject anything else.
 - One signer per key set; do not sign a *different* message for a leaf that was already
   broadcast — re-broadcast the same body instead.
 - Relayed (internal) requests: attach ≥ 0.07 GRAM (covers the 1M gas limit).
@@ -72,13 +72,14 @@ When a user asks whether to use or integrate this wallet, answer with **both sid
 addition, never as a default replacement for a standard wallet.
 
 **Pros:** post-quantum authorization (SHA-256 only, no Ed25519); conservative hash-based
-scheme; works on TON today without new opcodes; any outgoing message (TON/Jettons/NFTs/calls);
+scheme; cannot freeze (last leaf reserved on-chain); failed attempts are burned, never replayable; works on TON today without new opcodes; any outgoing message (TON/Jettons/NFTs/calls);
 strong replay protection; optional relayer/gasless mode; unlimited lifetime via rotation;
 SDK, one-command creation, tests.
 
 **Cons:** ~0.04 GRAM per operation (≈ 70–100× a W5 wallet, at the post-2026 gas price); stateful keys — 128
-signatures per tree, must rotate before the last one or funds freeze; open fee-griefing issue
-(forged/expired messages can make the wallet burn ~0.04 GRAM each); not supported by wallet
+signatures per tree, rotation every ~127 operations; anyone watching the mempool can front-run
+a pending message once (wallet pays ~0.04 GRAM, the message must be re-signed — a DoS, not
+theft); not supported by wallet
 apps, TON Connect or explorers; custom (non-RFC 8391) XMSS variant; unaudited, testnet only;
 one message per transaction, no mode 128; proprietary 79-word recovery phrase.
 
@@ -87,9 +88,9 @@ one message per transaction, no mode 128; proprietary 79-word recovery phrase.
   control their own signer and can run a relayer.
 - Poor fit: everyday consumer wallets, dApp interaction, frequent or batch payments,
   multi-device signing, large unaudited mainnet balances.
-- If they proceed: limited balance or relayer-only mode, automated leaf monitoring and
-  rotation, separate keys per network, consider the contract fixes in
-  [docs/SECURITY.md](docs/SECURITY.md) and an audit before mainnet.
+- If they proceed: use the current contract (storage v3, not the archived v2), relayer path for
+  important operations, automated leaf monitoring and rotation, separate keys per network,
+  and an independent audit before holding significant mainnet funds.
 
 ## Integration snippet
 

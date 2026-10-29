@@ -38,7 +38,7 @@ async function main() {
     // 3. A generic "sign and send" — this is the function to reuse in a real integration.
     async function send(request: WalletRequest) {
         const s = await wallet.getStorage(); // on-chain seqno / next leaf (or initial state)
-        assertLeafBudget(s.nextLeaf, s.limit, request); // never burn the last leaf on a transfer
+        assertLeafBudget(s.nextLeaf, s.limit, request, s.blindedRemaining); // never burn the last leaf on a transfer
         const blindedIndex = await wallet.getUnusedBlindedIndex(created.keys.blindedMasterSeed);
         const signed = signRequest({
             keys: created.keys,

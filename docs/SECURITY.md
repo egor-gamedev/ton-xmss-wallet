@@ -29,66 +29,73 @@ with a large quantum computer (which breaks Ed25519, used by every standard TON 
 - TON itself (validators, other contracts, Jetton masters, bridges) still uses Ed25519.
   A quantum attacker able to forge validator signatures breaks the chain, not just wallets.
   This contract protects *this account's authorization* only.
-- Availability: see the griefing and freezing issues below.
+- Availability: see the residual griefing issue below.
+
+> Wallets created with the first published contract (storage v2, code hash `ff6a94b4…f5d7`,
+> `contracts/archive/xmss_wallet_v4_storage_v2.fc`) still have the original, more severe
+> versions of issues 1–3 (unbounded fee drain by replaying expired messages, possible permanent
+> freeze). There is no in-place upgrade: move funds to a new wallet created with the current
+> contract.
+
+## Fixed in the current contract (storage v3)
+
+All verified by tests in the `griefing protection` and `key rotation` groups.
+
+- **Expired / wrong-network-id / wrong-policy messages** are rejected *before*
+  `accept_message`, so replaying them costs the wallet nothing. Previously an expired message
+  could be replayed forever, each replay paid by the wallet.
+- **Every accepted attempt is burned before verification.** Right after `accept_message` the
+  contract commits `seqno + 1`, `next_leaf + 1` and the consumed blinded key, then verifies.
+  A forged or otherwise failing message is charged once, can never be replayed, and its
+  leaf is retired (so no one-time key is ever asked to sign a second digest after a failure).
+  This also covers out-of-gas during verification.
+- **No permanent freeze.** The contract itself refuses (for free, exit 162) to spend the last
+  leaf or the last blinded key on anything except `rotate_root`, and a rotation must install
+  a tree with at least two leaves. A forged message on that last leaf does not burn it;
+  instead externals are locked until the forged message's `valid_until`, after which the
+  leaked header is expired. The relayer (internal) path is not locked.
 
 ## Known issues
 
-### 1. Fee-drain griefing after `accept_message` — HIGH (*verified*)
+### 1. One-shot griefing of pending messages — MEDIUM (*verified*)
 
-Full WOTS+ verification costs ~600k gas, far above the 10k free gas credit for external
-messages, so the contract calls `accept_message` after only cheap checks (seqno, leaf index,
-`pub_seed`, blinded key present). Everything else runs at the wallet's expense, and a failure
-reverts state, so the same message stays acceptable.
+Full WOTS+ verification costs ~550–650k gas, far above the 10k free gas credit for external
+messages, so it must run after `accept_message`. Anyone who sees a pending signed message
+(externals are public, and so are relayed bodies inside the relayer's own message) can copy
+its header, garble the signature and get it in first. Effects, per observed message:
 
-- **Forged proof:** an attacker who sees any pending signed message (externals are public)
-  copies its header and blinded preimage, garbles the signature, and sends it. Each copy is
-  accepted, fails with exit 135, and costs the wallet ≈ **0.04 GRAM**. It can be repeated
-  until the genuine message lands and bumps `seqno`. Sending externals costs the attacker nothing.
-- **Expired message replay:** `valid_until` is checked after accept. If a signed message is
-  not included before it expires, **anyone holding its bytes can replay it indefinitely**;
-  each replay fails with exit 136 and costs the wallet ≈ 0.04 GRAM — until the owner sends a
-  new successful transaction (which itself re-uses the leaf, see issue 3).
-- **Exhausted wallet:** `next_leaf < limit` is also checked post-accept, so a fully exhausted
-  wallet can be drained the same way by replaying a message signed for leaf `limit`.
+- the wallet pays one verification: ≈ **0.04 GRAM** (up to ≈ 0.067 GRAM if the attacker also
+  rewrites the payload to grind the most expensive digest — bounded by the 1M gas limit);
+- the genuine message becomes invalid (its seqno/leaf/blinded key were burned) — the owner
+  must sign a new request;
+- one leaf is burned, so a persistent attacker forces earlier rotations.
 
-Mitigations available today:
+The attacker gains nothing and cannot steal funds, but can deny service to externals. When
+the burnable budget is down to the reserved last leaf, a forged rotation locks externals for
+at most the message's validity window instead of burning it.
 
-- Disable externals (`ALLOW_EXTERNAL = 0`) and submit every request through a whitelisted
-  relayer (op `sint`, §"Relayer" in [INTEGRATION.md](INTEGRATION.md)). The relayer pays gas,
-  so attacks cost the attacker money. The relayer can be a normal Ed25519 wallet: it can only
-  relay, never authorize, so a compromised relayer key means denial of service, not theft.
-- Keep the wallet balance small and top it up as needed; keep large amounts elsewhere.
-- Submit messages promptly with a short `valid_until`, and watch for inclusion.
+Mitigations: use the relayer path for important operations (a failure there costs the
+relayer, not the wallet, and bounces), keep `valid_until` short so stale headers die fast,
+rotate early (≤ 8 leaves left), keep the wallet balance moderate. A deployment can also be
+compiled with `ALLOW_EXTERNAL = 0` (new code hash / address) to accept relayed requests only.
 
-Recommended contract fix (not applied, changes the code hash): move the `wallet_id`,
-`valid_until`, `policy`, `next_leaf < limit` and `blinded_remaining > 0` checks before
-`accept_message` (they are cheap), and persist consumption of the blinded key before the
-expensive verification (e.g. `commit()` right after accept) so a leaked preimage can be
-charged at most once.
+### 2. One-time key reuse after a *dropped* message — LOW
 
-### 2. Last leaf must be used for rotation — HIGH (*verified*)
-
-`rotate_root` needs a valid signature from a leaf of the current tree. Once
-`next_leaf == limit` nothing can be signed again and **all funds are frozen forever**.
-Always rotate while at least one leaf remains. The SDK's `assertLeafBudget()` (used by all
-scripts) refuses to spend the last leaf on anything but `rotate_root`; integrators must do
-the same. `status` warns at ≤ 8 leaves. Note that whitelist changes also consume leaves.
-
-### 3. One-time key reuse after a failed or dropped transaction — MEDIUM
-
-The contract requires `leaf_index == next_leaf`. If a signed message for leaf `i` is
-broadcast but not executed (expired, out of gas, post-accept failure), the next request
-must be signed **with the same leaf `i` over a different digest**. Two WOTS+ signatures from
-one key reveal more chain values and can make forgeries feasible for an attacker who
-grinds digests.
+If a signed message is broadcast but never accepted on-chain (dropped by the network or
+expired before inclusion), the state does not change and the next request must be signed
+with the same leaf over a different digest. Its first signature may have been observed in
+transit, and two WOTS+ signatures from one key make forgeries easier.
 
 - Prefer re-broadcasting the *identical* body while it is still valid.
 - Use a `valid_until` long enough for inclusion (the SDK default is 10 minutes, max 24 h).
-- If a re-sign was unavoidable, rotate to a new tree soon after.
+- If a re-sign after a dropped message was unavoidable, rotate to a new tree soon after.
 - Never run two signers (devices, backends) for the same key set concurrently: both would
   read the same `next_leaf` and sign different messages with it.
 
-### 4. Relayer value depends on the gas price — LOW (*verified*)
+The same applies to the last-leaf rotation after a lock (above): the rotation is re-signed
+with the same, final leaf; rotate to the new tree immediately.
+
+### 3. Relayer value depends on the gas price — LOW (*verified*)
 
 Internal processing does not call `accept_message`, so gas is limited to
 `msg_value / gas_price`. At today's 66.67 nanoGRAM/gas the hard-coded minimum of 0.05 GRAM
@@ -97,14 +104,14 @@ gas-price cut (400 nanoTON/gas) it bought only 125k gas and every relayed reques
 exit −14. Relayers should attach **≥ 0.07 GRAM** (covers the full 1M gas limit) and re-check
 this if the network gas price is ever raised. The unused remainder stays in the wallet.
 
-### 5. Signatures are not network-bound — MEDIUM
+### 4. Signatures are not network-bound — MEDIUM
 
 The digest contains the wallet address and `wallet_id` but no network id. If the same key set
 and the same init data are deployed on testnet and mainnet, the addresses are identical and
 testnet signatures are valid on mainnet. **Use different key sets (or at least a different
 `wallet_id`) per network.**
 
-### 6. Cryptography is a custom XMSS variant — informational
+### 5. Cryptography is a custom XMSS variant — informational
 
 - No ADRS tweaks/bitmasks: every chain hash is keyed only by `pub_seed`. Multi-target attacks
   over ~128 × 67 × 15 ≈ 2^17 hash targets reduce second-preimage security from 256 to
@@ -112,7 +119,7 @@ testnet signatures are valid on mainnet. **Use different key sets (or at least a
   bounds, and non-standard.
 - Not interoperable with XMSS libraries, HSMs or hardware wallets; no independent review.
 
-### 7. Restrictions you might not expect — informational
+### 6. Restrictions you might not expect — informational
 
 - One outgoing message per request (no batching).
 - Send modes limited to 0, 1, 2, 64, 65, 66: mode 128 (send whole balance) and +32
@@ -127,6 +134,6 @@ testnet signatures are valid on mainnet. **Use different key sets (or at least a
 - [ ] Keys generated offline on a trusted machine; `keys/` never committed (it is gitignored).
 - [ ] 79-word recovery phrase stored offline; a **new** phrase after every rotation.
 - [ ] Separate key set per network.
-- [ ] Rotate before `get_leaves_remaining` drops to 1 (plan for ~127 operations per tree).
-- [ ] Wallet balance kept low, or externals disabled and a relayer used.
+- [ ] Rotate at ≤ 8 leaves left (plan for ~127 operations per tree; the last leaf is reserved).
+- [ ] Important operations sent through a relayer, or with a short `valid_until`.
 - [ ] A single signer process per key set.

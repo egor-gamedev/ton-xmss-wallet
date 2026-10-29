@@ -18,5 +18,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Check code hash is unchanged
-        run: node -e "const h=require('./build/xmss_wallet.compiled.json').hash; if(h!=='ff6a94b4e2174005bbf87215a9f7d9b69b284b4bc6cca30327ee9f5f1887f5d7'){console.error('code hash changed: '+h+' — update docs and EXPECTED_CODE_HASH');process.exit(1)}"
+        run: node -e "const h=require('./build/xmss_wallet.compiled.json').hash; if(h!=='4f6ce7bea9b50089fad7736b0fe5d10f54b136ebcc412254e376e2db825338ac'){console.error('code hash changed: '+h+' — update docs and EXPECTED_CODE_HASH');process.exit(1)}"
       - run: npm test
